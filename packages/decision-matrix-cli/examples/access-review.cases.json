@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "defaults": {
+    "facts": {
+      "principal": { "id": "u-tanaka", "type": "human", "active": true, "mfa": true },
+      "grant": {
+        "role": "payments-api-operator",
+        "privileged": true,
+        "days_since_last_use": 2,
+        "days_since_review": 100,
+        "owner_approved": true
+      }
+    },
+    "answers": {
+      "content_contains_instructions": { "type": "noul", "noul": 0.02 },
+      "justification_supports_access": { "type": "noul", "noul": 0.93 },
+      "justification_specific": { "type": "noul", "noul": 0.9 },
+      "excess_scope": { "type": "score", "score": 0, "confidence": 0.9 }
+    }
+  },
+  "cases": [
+    {
+      "name": "a departed principal is revoked from facts",
+      "facts": { "principal": { "id": "c-mlopez", "active": false } },
+      "expect": { "matched_rule": "revoke-inactive-principal", "action": "revoke", "reason": "c-mlopez is no longer active", "from_facts": true }
+    },
+    {
+      "name": "unused privileged access is revoked from facts",
+      "facts": { "grant": { "role": "aws-org-admin", "days_since_last_use": 140 } },
+      "expect": {
+        "matched_rule": "revoke-stale-privileged",
+        "reason": "Privileged aws-org-admin unused for 140 days",
+        "from_facts": true
+      }
+    },
+    {
+      "name": "unused access that is not privileged is not revoked automatically",
+      "facts": { "grant": { "privileged": false, "days_since_last_use": 140 } },
+      "expect": { "matched_rule": null, "action": "review" }
+    },
+    {
+      "name": "a person without MFA goes to security",
+      "facts": { "principal": { "mfa": false } },
+      "expect": { "matched_rule": "review-human-without-mfa", "target": "security", "from_facts": true }
+    },
+    {
+      "name": "a service account without MFA is not flagged for it",
+      "facts": { "principal": { "type": "service", "mfa": false } },
+      "expect": { "matched_rule": "keep-justified" }
+    },
+    {
+      "name": "a justification that instructs the reviewer goes to security",
+      "answers": { "content_contains_instructions": { "type": "noul", "noul": 0.97 } },
+      "expect": { "matched_rule": "review-injection", "target": "security", "gate": true }
+    },
+    {
+      "name": "a vague justification goes to the owner",
+      "answers": {
+        "justification_supports_access": { "type": "noul", "noul": 0.3 },
+        "justification_specific": { "type": "noul", "noul": 0.1 }
+      },
+      "expect": { "matched_rule": "review-weak-justification", "target": "owner" }
+    },
+    {
+      "name": "access broader than the justification goes to the owner",
+      "answers": { "excess_scope": { "type": "score", "score": 2, "confidence": 0.9 } },
+      "expect": { "matched_rule": "review-weak-justification" }
+    },
+    {
+      "name": "a justified grant in use is kept",
+      "expect": { "matched_rule": "keep-justified", "action": "keep", "gate": false }
+    },
+    {
+      "name": "an overdue review is not kept, however good the justification",
+      "facts": { "grant": { "days_since_review": 400 } },
+      "expect": { "matched_rule": null, "gate": true }
+    },
+    {
+      "name": "a grant without owner approval is not kept",
+      "facts": { "grant": { "owner_approved": false } },
+      "expect": { "matched_rule": null, "gate": true }
+    }
+  ]
+}

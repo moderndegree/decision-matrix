@@ -1,0 +1,238 @@
+{
+  "name": "Decision Matrix — SDLC change",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## SDLC change routing\n\nPOST a change request. State can be a string or a JSON object (title, body, paths). The Decision Matrix node uses the **SDLC Change** question preset: change_type, risk, needs_design, ready_to_implement.\n\nRules return action `review` (design), `route` (implementer), or `escalate` (human). Point the Decision Server API credential at any `/v1/systemone` server. Set Options → Model when that server requires a model name.",
+        "height": 240,
+        "width": 440
+      },
+      "id": "8d2b1c3f-5e66-4b2f-8d42-1b7f602c2004",
+      "name": "Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-20, 40]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "decision-sdlc",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "8d2b1c3f-5e66-4b2f-8d42-1b7f602c2001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 340],
+      "webhookId": "decision-sdlc"
+    },
+    {
+      "parameters": {
+        "state": "={{ $json.body.state ?? $json.body.message ?? $json.body }}",
+        "questionSet": "sdlc",
+        "rules": {
+          "version": 1,
+          "default_action": {
+            "type": "escalate",
+            "target": "human",
+            "reason": "No matching rule"
+          },
+          "thresholds": {
+            "high_confidence": 0.85,
+            "medium_confidence": 0.7,
+            "high_risk": 2
+          },
+          "rules": [
+            {
+              "id": "needs-design",
+              "description": "Unclear or high-risk work goes to design review",
+              "when": {
+                "any": [
+                  { "question": "needs_design", "gte": "medium_confidence" },
+                  { "question": "risk", "gte": "high_risk" },
+                  { "question": "ready_to_implement", "lt": 0.4 }
+                ]
+              },
+              "action": {
+                "type": "review",
+                "target": "design",
+                "reason": "Change needs design review before implementation",
+                "gate": true
+              }
+            },
+            {
+              "id": "ready-implementer",
+              "description": "Specific, lower-risk work can go to an implementer",
+              "when": {
+                "all": [
+                  { "question": "ready_to_implement", "gte": "high_confidence" },
+                  { "question": "risk", "lt": "high_risk" },
+                  {
+                    "question": "change_type",
+                    "in": ["feature", "bugfix", "refactor", "docs", "chore"],
+                    "confidence_gte": "medium_confidence"
+                  }
+                ]
+              },
+              "action": {
+                "type": "route",
+                "target": "implementer",
+                "reason": "Ready to implement as {{answers.change_type.choice}}",
+                "gate": false
+              }
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000,
+          "includeFullAnswers": true,
+          "failOnNoMatch": false
+        }
+      },
+      "id": "8d2b1c3f-5e66-4b2f-8d42-1b7f602c2002",
+      "name": "Decision Matrix",
+      "type": "n8n-nodes-decision-matrix.decisionMatrix",
+      "typeVersion": 1,
+      "position": [520, 340],
+      "credentials": {
+        "decisionServerApi": {
+          "name": "Decision Server API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c0ffee00-0000-4000-8000-000000000011",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "review",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "review"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c0ffee00-0000-4000-8000-000000000012",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "route",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "route"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c0ffee00-0000-4000-8000-000000000013",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "escalate",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "escalate"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "8d2b1c3f-5e66-4b2f-8d42-1b7f602c2003",
+      "name": "Switch on action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [820, 340]
+    }
+  ],
+  "pinData": {
+    "Webhook": [
+      {
+        "json": {
+          "body": {
+            "title": "Add retry with jitter to the billing webhook handler",
+            "body": "The handler fails the whole batch when the provider returns 429. Retry three times with jitter, and do not change the public API.",
+            "paths": ["services/billing/webhook.ts"]
+          }
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Decision Matrix",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decision Matrix": {
+      "main": [
+        [
+          {
+            "node": "Switch on action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

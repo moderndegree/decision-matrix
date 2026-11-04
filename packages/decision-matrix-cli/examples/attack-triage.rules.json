@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "default_action": {
+    "type": "escalate",
+    "target": "human",
+    "reason": "No matching rule",
+    "gate": true
+  },
+  "thresholds": {
+    "high_confidence": 0.85,
+    "high_risk": 2
+  },
+  "rules": [
+    {
+      "id": "hold-hostile",
+      "description": "A confident hostile intent is blocked before any other route",
+      "when": {
+        "all": [
+          {
+            "question": "intent",
+            "in": ["account_takeover", "social_engineering", "supply_chain", "reconnaissance"],
+            "confidence_gte": "high_confidence"
+          }
+        ]
+      },
+      "action": {
+        "type": "block",
+        "target": "security",
+        "reason": "Hold {{answers.intent.choice}} before any automated action",
+        "gate": true
+      }
+    },
+    {
+      "id": "hold-uncertain",
+      "description": "High risk or a human-review signal goes to a person",
+      "when": {
+        "any": [
+          { "question": "needs_human", "gte": "high_confidence" },
+          { "question": "risk", "gte": "high_risk" }
+        ]
+      },
+      "action": {
+        "type": "escalate",
+        "target": "human",
+        "reason": "Risk or human-review signal crossed the threshold",
+        "gate": true
+      }
+    },
+    {
+      "id": "allow-legitimate",
+      "description": "Only a confident, low-risk, legitimate event can be automated",
+      "when": {
+        "all": [
+          {
+            "question": "intent",
+            "in": ["legitimate_ops", "benign"],
+            "confidence_gte": "high_confidence"
+          },
+          { "question": "risk", "lt": "high_risk" }
+        ]
+      },
+      "action": {
+        "type": "allow",
+        "target": "automation",
+        "reason": "Allow {{answers.intent.choice}} below risk {{thresholds.high_risk}}",
+        "gate": false
+      }
+    }
+  ]
+}

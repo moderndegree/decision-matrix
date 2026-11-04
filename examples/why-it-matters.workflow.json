@@ -1,0 +1,764 @@
+{
+  "name": "Why the decision matrix",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Run this\n\nClick **Execute workflow**.\n\nFive requests go through **Intake policy**. Open that node and read the output table: one ruleset, five different actions. The Switch only fans out the action the matrix already chose.\n\nThen open **Raised bar**. It is the same five requests and the same rules. The only change is a Thresholds row: `medium_confidence` moves from 0.7 to 0.99. The README typo stops being automatic. The outage still pages, because that rule uses `high_confidence` and blast radius, which this knob does not touch.",
+        "height": 280,
+        "width": 460,
+        "color": 4
+      },
+      "id": "b1d0e6a0-0001-4000-8000-000000000001",
+      "name": "How to read this",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-40, -40]
+    },
+    {
+      "parameters": {
+        "content": "## One ruleset, first match\n\nThe node asks four questions: work type, blast radius, needs design, needs a human. It walks the rules in order and stops at the first hit.\n\n1. Confident incident and blast radius ≥ `wide_blast` (2) → page on-call. `gate` is true.\n2. Needs design ≥ `medium_confidence` (0.7), or blast radius ≥ 2 → hold for design. `gate` is true.\n3. Bugfix or feature, confidence ≥ `medium_confidence`, blast radius < 2, no design signal, no human signal → implementer.\n4. Anything else → a person. That includes a low-confidence guess at \"bugfix\".\n\nThe comparisons name the thresholds. A later item can override one number without editing the policy.",
+        "height": 340,
+        "width": 500,
+        "color": 5
+      },
+      "id": "b1d0e6a0-0001-4000-8000-000000000002",
+      "name": "The policy",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [460, -40]
+    },
+    {
+      "parameters": {
+        "content": "## The same policy as nested IFs\n\nIncident AND confidence ≥ 0.85 AND blast radius ≥ 2 → page.\nElse needs design ≥ 0.7 OR blast radius ≥ 2 → design review.\nElse type is bugfix or feature AND confidence ≥ 0.7 AND blast radius < 2 AND needs design < 0.4 AND needs a human < 0.5 → implementer.\nElse → a person.\n\nEach new question adds another branch. Changing 0.7 means finding every comparison that used it. Here that number is the name `medium_confidence`, and the rule order is the priority.",
+        "height": 300,
+        "width": 460,
+        "color": 6
+      },
+      "id": "b1d0e6a0-0001-4000-8000-000000000003",
+      "name": "What this replaces",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [1000, -40]
+    },
+    {
+      "parameters": {
+        "content": "## Where the answers come from\n\nThe compose stand-in maps phrases in the state to fixed answers: checkout is down, migrate, not sure / maybe, typo / README, make it better. A real System One server would score these same four questions. The rules do not change between those two.\n\nPinned on **Requests**, in order:\n1. Checkout is down → page on-call\n2. Migrate the payments schema → hold for design\n3. Maybe a bug, not sure → a person (the type is bugfix, the confidence is 0.48)\n4. Typo in the README → implementer\n5. Make the app better → a person",
+        "height": 320,
+        "width": 460
+      },
+      "id": "b1d0e6a0-0001-4000-8000-000000000004",
+      "name": "The five requests",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [1500, -40]
+    },
+    {
+      "parameters": {},
+      "id": "b1d0e6a0-0001-4000-8000-000000000010",
+      "name": "Requests",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [200, 460]
+    },
+    {
+      "parameters": {
+        "state": "={{ $json.state }}",
+        "questionSet": "custom",
+        "questions": {
+          "work_type": {
+            "type": "choice",
+            "instructions": "What kind of work is this",
+            "criteria": {
+              "incident": "Customers are blocked or a service is down",
+              "bugfix": "Correct broken behavior, small and specific",
+              "feature": "New behavior or a structural change",
+              "unclear": "The request does not say what to do"
+            }
+          },
+          "blast_radius": {
+            "type": "score",
+            "instructions": "How wide is the blast radius if we act on this",
+            "criteria": [
+              "One file or a copy change",
+              "One feature, easy to reverse",
+              "Shared data or several services",
+              "Payments, security, or hard to reverse"
+            ]
+          },
+          "needs_design": {
+            "type": "noul",
+            "instructions": "A design review should happen before anyone implements this"
+          },
+          "needs_human": {
+            "type": "noul",
+            "instructions": "A person should look at this before any automated action"
+          }
+        },
+        "rules": {
+          "version": 1,
+          "default_action": {
+            "type": "escalate",
+            "target": "human",
+            "reason": "Not confident enough to act on {{answers.work_type.choice}} ({{answers.work_type.confidence}})"
+          },
+          "thresholds": {
+            "high_confidence": 0.85,
+            "medium_confidence": 0.7,
+            "wide_blast": 2
+          },
+          "rules": [
+            {
+              "id": "page-incident",
+              "description": "A confident incident with a wide blast radius pages on-call",
+              "when": {
+                "all": [
+                  {
+                    "question": "work_type",
+                    "eq": "incident",
+                    "confidence_gte": "high_confidence"
+                  },
+                  { "question": "blast_radius", "gte": "wide_blast" }
+                ]
+              },
+              "action": {
+                "type": "page",
+                "target": "oncall",
+                "reason": "Incident, blast radius {{answers.blast_radius.score}}",
+                "gate": true
+              }
+            },
+            {
+              "id": "hold-for-design",
+              "description": "A wide blast radius or a design signal is held before implementation",
+              "when": {
+                "any": [
+                  { "question": "needs_design", "gte": "medium_confidence" },
+                  { "question": "blast_radius", "gte": "wide_blast" }
+                ]
+              },
+              "action": {
+                "type": "review",
+                "target": "design",
+                "reason": "Hold for design. Blast radius {{answers.blast_radius.score}}, needs_design {{answers.needs_design.noul}}",
+                "gate": true
+              }
+            },
+            {
+              "id": "ship-it",
+              "description": "A confident, narrow bugfix or feature can go to an implementer",
+              "when": {
+                "all": [
+                  {
+                    "question": "work_type",
+                    "in": ["bugfix", "feature"],
+                    "confidence_gte": "medium_confidence"
+                  },
+                  { "question": "blast_radius", "lt": "wide_blast" },
+                  { "question": "needs_design", "lt": 0.4 },
+                  { "question": "needs_human", "lt": 0.5 }
+                ]
+              },
+              "action": {
+                "type": "route",
+                "target": "implementer",
+                "reason": "Ship as {{answers.work_type.choice}}. Blast radius {{answers.blast_radius.score}}",
+                "gate": false
+              }
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000,
+          "includeFullAnswers": true,
+          "failOnNoMatch": false
+        }
+      },
+      "id": "b1d0e6a0-0001-4000-8000-000000000011",
+      "name": "Intake policy",
+      "type": "n8n-nodes-decision-matrix.decisionMatrix",
+      "typeVersion": 1,
+      "position": [480, 360],
+      "credentials": {
+        "decisionServerApi": {
+          "name": "Decision Server API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c0ffee00-0000-4000-8000-000000000101",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "page",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "page"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c0ffee00-0000-4000-8000-000000000102",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "review",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "review"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c0ffee00-0000-4000-8000-000000000103",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "route",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "route"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c0ffee00-0000-4000-8000-000000000104",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "escalate",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "escalate"
+            }
+          ]
+        },
+        "options": { "fallbackOutput": "extra" }
+      },
+      "id": "b1d0e6a0-0001-4000-8000-000000000012",
+      "name": "Fan out the action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [800, 360]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e1000000-0000-4000-8000-000000000001",
+              "name": "summary",
+              "value": "={{ $json.reason }} ({{ $json.matched_rule }}, gate {{ $json.gate }})",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1d0e6a0-0001-4000-8000-000000000013",
+      "name": "Page on-call",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1120, 180]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e1000000-0000-4000-8000-000000000002",
+              "name": "summary",
+              "value": "={{ $json.reason }} ({{ $json.matched_rule }}, gate {{ $json.gate }})",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1d0e6a0-0001-4000-8000-000000000014",
+      "name": "Hold for design",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1120, 320]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e1000000-0000-4000-8000-000000000003",
+              "name": "summary",
+              "value": "={{ $json.reason }} ({{ $json.matched_rule }}, gate {{ $json.gate }})",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1d0e6a0-0001-4000-8000-000000000015",
+      "name": "Ship to implementer",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1120, 460]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e1000000-0000-4000-8000-000000000004",
+              "name": "summary",
+              "value": "={{ $json.reason }} ({{ $json.matched_rule }}, gate {{ $json.gate }})",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1d0e6a0-0001-4000-8000-000000000016",
+      "name": "Ask a person",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1120, 600]
+    },
+    {
+      "parameters": {
+        "state": "={{ $json.state }}",
+        "questionSet": "custom",
+        "questions": {
+          "work_type": {
+            "type": "choice",
+            "instructions": "What kind of work is this",
+            "criteria": {
+              "incident": "Customers are blocked or a service is down",
+              "bugfix": "Correct broken behavior, small and specific",
+              "feature": "New behavior or a structural change",
+              "unclear": "The request does not say what to do"
+            }
+          },
+          "blast_radius": {
+            "type": "score",
+            "instructions": "How wide is the blast radius if we act on this",
+            "criteria": [
+              "One file or a copy change",
+              "One feature, easy to reverse",
+              "Shared data or several services",
+              "Payments, security, or hard to reverse"
+            ]
+          },
+          "needs_design": {
+            "type": "noul",
+            "instructions": "A design review should happen before anyone implements this"
+          },
+          "needs_human": {
+            "type": "noul",
+            "instructions": "A person should look at this before any automated action"
+          }
+        },
+        "rules": {
+          "version": 1,
+          "default_action": {
+            "type": "escalate",
+            "target": "human",
+            "reason": "Not confident enough to act on {{answers.work_type.choice}} ({{answers.work_type.confidence}})"
+          },
+          "thresholds": {
+            "high_confidence": 0.85,
+            "medium_confidence": 0.7,
+            "wide_blast": 2
+          },
+          "rules": [
+            {
+              "id": "page-incident",
+              "description": "A confident incident with a wide blast radius pages on-call",
+              "when": {
+                "all": [
+                  {
+                    "question": "work_type",
+                    "eq": "incident",
+                    "confidence_gte": "high_confidence"
+                  },
+                  { "question": "blast_radius", "gte": "wide_blast" }
+                ]
+              },
+              "action": {
+                "type": "page",
+                "target": "oncall",
+                "reason": "Incident, blast radius {{answers.blast_radius.score}}",
+                "gate": true
+              }
+            },
+            {
+              "id": "hold-for-design",
+              "description": "A wide blast radius or a design signal is held before implementation",
+              "when": {
+                "any": [
+                  { "question": "needs_design", "gte": "medium_confidence" },
+                  { "question": "blast_radius", "gte": "wide_blast" }
+                ]
+              },
+              "action": {
+                "type": "review",
+                "target": "design",
+                "reason": "Hold for design. Blast radius {{answers.blast_radius.score}}, needs_design {{answers.needs_design.noul}}",
+                "gate": true
+              }
+            },
+            {
+              "id": "ship-it",
+              "description": "A confident, narrow bugfix or feature can go to an implementer",
+              "when": {
+                "all": [
+                  {
+                    "question": "work_type",
+                    "in": ["bugfix", "feature"],
+                    "confidence_gte": "medium_confidence"
+                  },
+                  { "question": "blast_radius", "lt": "wide_blast" },
+                  { "question": "needs_design", "lt": 0.4 },
+                  { "question": "needs_human", "lt": 0.5 }
+                ]
+              },
+              "action": {
+                "type": "route",
+                "target": "implementer",
+                "reason": "Ship as {{answers.work_type.choice}}. Blast radius {{answers.blast_radius.score}}",
+                "gate": false
+              }
+            }
+          ]
+        },
+        "thresholds": {
+          "threshold": [
+            { "name": "medium_confidence", "value": 0.99 }
+          ]
+        },
+        "options": {
+          "timeout": 60000,
+          "includeFullAnswers": true,
+          "failOnNoMatch": false
+        }
+      },
+      "id": "b1d0e6a0-0001-4000-8000-000000000021",
+      "name": "Raised bar",
+      "type": "n8n-nodes-decision-matrix.decisionMatrix",
+      "typeVersion": 1,
+      "position": [480, 820],
+      "credentials": {
+        "decisionServerApi": {
+          "name": "Decision Server API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c0ffee00-0000-4000-8000-000000000201",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "page",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "page"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c0ffee00-0000-4000-8000-000000000202",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "review",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "review"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c0ffee00-0000-4000-8000-000000000203",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "route",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "route"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c0ffee00-0000-4000-8000-000000000204",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "escalate",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "escalate"
+            }
+          ]
+        },
+        "options": { "fallbackOutput": "extra" }
+      },
+      "id": "b1d0e6a0-0001-4000-8000-000000000022",
+      "name": "Fan out after the raise",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [800, 820]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e1000000-0000-4000-8000-000000000011",
+              "name": "summary",
+              "value": "={{ $json.reason }} ({{ $json.matched_rule }})",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1d0e6a0-0001-4000-8000-000000000023",
+      "name": "Still pages",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1120, 740]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e1000000-0000-4000-8000-000000000012",
+              "name": "summary",
+              "value": "={{ $json.reason }} ({{ $json.matched_rule }})",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1d0e6a0-0001-4000-8000-000000000024",
+      "name": "Still held for design",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1120, 860]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e1000000-0000-4000-8000-000000000013",
+              "name": "summary",
+              "value": "={{ $json.reason }} ({{ $json.matched_rule }})",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1d0e6a0-0001-4000-8000-000000000025",
+      "name": "Would still ship",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1120, 980]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e1000000-0000-4000-8000-000000000014",
+              "name": "summary",
+              "value": "={{ $json.reason }} ({{ $json.matched_rule }})",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1d0e6a0-0001-4000-8000-000000000026",
+      "name": "Now asks a person",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1120, 1100]
+    }
+  ],
+  "pinData": {
+    "Requests": [
+      {
+        "json": {
+          "title": "Checkout is down for all customers",
+          "state": "Checkout is down for all customers. Every order fails. This started 10 minutes ago.",
+          "expect": "page on-call"
+        }
+      },
+      {
+        "json": {
+          "title": "Migrate the payments schema",
+          "state": "Migrate the payments schema to a new ledger. This touches every charge and is hard to reverse.",
+          "expect": "hold for design"
+        }
+      },
+      {
+        "json": {
+          "title": "Maybe a bug in the CSV export",
+          "state": "Maybe a bug in the CSV export. Not sure. A few users mentioned it, and there is no reproduction.",
+          "expect": "ask a person, because confidence is low"
+        }
+      },
+      {
+        "json": {
+          "title": "Fix a typo in the README",
+          "state": "Fix a typo in the README install section. One word, no behavior change.",
+          "expect": "ship to an implementer"
+        }
+      },
+      {
+        "json": {
+          "title": "Make the app better",
+          "state": "Make the app better. Users say something feels off, but there is no specific defect.",
+          "expect": "ask a person"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Requests": {
+      "main": [
+        [
+          { "node": "Intake policy", "type": "main", "index": 0 },
+          { "node": "Raised bar", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Intake policy": {
+      "main": [
+        [
+          { "node": "Fan out the action", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Fan out the action": {
+      "main": [
+        [{ "node": "Page on-call", "type": "main", "index": 0 }],
+        [{ "node": "Hold for design", "type": "main", "index": 0 }],
+        [{ "node": "Ship to implementer", "type": "main", "index": 0 }],
+        [{ "node": "Ask a person", "type": "main", "index": 0 }]
+      ]
+    },
+    "Raised bar": {
+      "main": [
+        [
+          { "node": "Fan out after the raise", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Fan out after the raise": {
+      "main": [
+        [{ "node": "Still pages", "type": "main", "index": 0 }],
+        [{ "node": "Still held for design", "type": "main", "index": 0 }],
+        [{ "node": "Would still ship", "type": "main", "index": 0 }],
+        [{ "node": "Now asks a person", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "meta": { "templateCredsSetupCompleted": true },
+  "tags": []
+}

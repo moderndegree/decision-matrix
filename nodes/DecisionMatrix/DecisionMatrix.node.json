@@ -1,0 +1,19 @@
+{
+  "node": "n8n-nodes-decision-matrix.decisionMatrix",
+  "nodeVersion": "1.0",
+  "codexVersion": "1.0",
+  "categories": ["Miscellaneous", "Development"],
+  "alias": ["System One", "Jev", "Decision", "Rules", "Triage"],
+  "resources": {
+    "primaryDocumentation": [
+      {
+        "url": "https://docs.n8n.io/integrations/community-nodes/installation/"
+      }
+    ],
+    "credentialDocumentation": [
+      {
+        "url": "https://docs.n8n.io/integrations/community-nodes/installation/"
+      }
+    ]
+  }
+}

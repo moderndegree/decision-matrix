@@ -1,0 +1,155 @@
+{
+  "version": 1,
+  "open_gate_requires_facts": true,
+  "default_action": {
+    "type": "review",
+    "target": "owner",
+    "reason": "No rule kept this grant",
+    "gate": true
+  },
+  "thresholds": {
+    "high_confidence": 0.85,
+    "injection": 0.5,
+    "stale_privileged_days": 90,
+    "stale_days": 30,
+    "review_days": 365
+  },
+  "rules": [
+    {
+      "id": "revoke-inactive-principal",
+      "description": "HR or the directory says the person or service is gone",
+      "when": {
+        "all": [
+          {
+            "fact": "principal.active",
+            "eq": false
+          }
+        ]
+      },
+      "action": {
+        "type": "revoke",
+        "target": "iam",
+        "reason": "{{facts.principal.id}} is no longer active",
+        "gate": true
+      }
+    },
+    {
+      "id": "revoke-stale-privileged",
+      "when": {
+        "all": [
+          {
+            "fact": "grant.privileged",
+            "eq": true
+          },
+          {
+            "fact": "grant.days_since_last_use",
+            "gte": "stale_privileged_days"
+          }
+        ]
+      },
+      "action": {
+        "type": "revoke",
+        "target": "iam",
+        "reason": "Privileged {{facts.grant.role}} unused for {{facts.grant.days_since_last_use}} days",
+        "gate": true
+      }
+    },
+    {
+      "id": "review-human-without-mfa",
+      "when": {
+        "all": [
+          {
+            "fact": "principal.type",
+            "eq": "human"
+          },
+          {
+            "fact": "principal.mfa",
+            "eq": false
+          }
+        ]
+      },
+      "action": {
+        "type": "review",
+        "target": "security",
+        "reason": "{{facts.principal.id}} holds {{facts.grant.role}} without MFA",
+        "gate": true
+      }
+    },
+    {
+      "id": "review-injection",
+      "description": "The grantee wrote the justification. Text that addresses the reviewer goes to security.",
+      "when": {
+        "all": [
+          {
+            "question": "content_contains_instructions",
+            "gte": "injection"
+          }
+        ]
+      },
+      "action": {
+        "type": "review",
+        "target": "security",
+        "reason": "The justification for {{facts.grant.role}} tries to instruct the reviewer",
+        "gate": true
+      }
+    },
+    {
+      "id": "review-weak-justification",
+      "when": {
+        "any": [
+          {
+            "question": "justification_supports_access",
+            "lt": 0.5
+          },
+          {
+            "question": "justification_specific",
+            "lt": 0.5
+          },
+          {
+            "question": "excess_scope",
+            "gte": 2
+          }
+        ]
+      },
+      "action": {
+        "type": "review",
+        "target": "owner",
+        "reason": "The justification does not support {{facts.grant.role}} as granted",
+        "gate": true
+      }
+    },
+    {
+      "id": "keep-justified",
+      "when": {
+        "all": [
+          {
+            "fact": "grant.owner_approved",
+            "eq": true
+          },
+          {
+            "fact": "grant.days_since_last_use",
+            "lte": "stale_days"
+          },
+          {
+            "fact": "grant.days_since_review",
+            "lte": "review_days"
+          },
+          {
+            "question": "justification_supports_access",
+            "gte": "high_confidence"
+          },
+          {
+            "question": "excess_scope",
+            "lt": 2
+          }
+        ]
+      },
+      "action": {
+        "type": "keep",
+        "target": "audit-log",
+        "reason": "In use, approved, reviewed, and justified",
+        "gate": false
+      }
+    }
+  ]
+}

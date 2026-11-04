@@ -1,0 +1,121 @@
+# Decision gate: a required check on pull requests.
+#
+# Copy to .github/workflows/decision-gate.yml. Copy collect-facts.mjs,
+# ci-change.rules.json, and ci-change.questions.json to .github/decision-matrix/.
+# Mark the "gate" job as a required status check in branch protection.
+#
+# Why pull_request_target: the run uses the workflow, the fact collector, and
+# the policy from the BASE branch, so a pull request cannot edit them for its
+# own run. A PR that changes any of them is held by the touches_ci fact.
+# The trade-off is that pull_request_target runs with secrets, so this job
+# must never check out or execute PR code. It only fetches the PR commits and
+# reads them with git show and git diff.
+#
+# Pin every action to a full commit SHA before you rely on this. Tags can move.
+
+name: Decision gate
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+
+permissions: {}
+
+concurrency:
+  group: decision-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      action: ${{ steps.decide.outputs.action }}
+    steps:
+      - name: Check out the base branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+
+      - name: Fetch the PR commits without checking them out
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: git fetch --no-tags origin "+refs/pull/${PR_NUMBER}/head:refs/remotes/pr/head"
+
+      - name: Dependency bot metadata
+        id: dependabot
+        if: github.event.pull_request.user.login == 'dependabot[bot]'
+        uses: dependabot/fetch-metadata@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Event fields reach scripts through env, never through ${{ }} inside run:,
+      # so a crafted title or branch name cannot inject shell.
+      - name: Collect facts and state
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          DEPENDENCY_UPDATE_TYPE: ${{ steps.dependabot.outputs.update-type }}
+          OUT_DIR: ${{ runner.temp }}/decision
+        run: node .github/decision-matrix/collect-facts.mjs
+
+      # Exit 0: pass. Exit 2: held, so the check fails. Exit 1: the gate itself
+      # failed, so the check fails. Only exit 0 lets the PR merge.
+      # The CLI is installed from npm here. Pin the version, or vendor it and
+      # run it from the base checkout.
+      - name: Decide
+        id: decide
+        env:
+          DECISION_SERVER_URL: ${{ vars.DECISION_SERVER_URL }}
+          DECISION_SERVER_API_KEY: ${{ secrets.DECISION_SERVER_API_KEY }}
+          DECISION_SERVER_MODEL: ${{ vars.DECISION_SERVER_MODEL }}
+          OUT_DIR: ${{ runner.temp }}/decision
+        run: |
+          set +e
+          npx --yes --package decision-matrix-cli@0.1.0 decision-matrix decide \
+            --rules .github/decision-matrix/ci-change.rules.json \
+            --questions .github/decision-matrix/ci-change.questions.json \
+            --facts "$OUT_DIR/facts.json" \
+            --state "$OUT_DIR/state.json" \
+            --fail-on-gate > "$OUT_DIR/decision.json"
+          code=$?
+          set -e
+          if [ "$code" = 1 ]; then
+            echo "::error::The decision gate could not decide. Treating this as a hold."
+            exit 1
+          fi
+          node -e '
+            const fs = require("fs");
+            const d = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `action=${d.action}\n`);
+            const cell = (v) => String(v).replace(/[|\r\n]/g, " ");
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, [
+              "| action | target | rule | confidence | reason |",
+              "| --- | --- | --- | --- | --- |",
+              `| ${cell(d.action)} | ${cell(d.target)} | ${cell(d.matched_rule ?? "default")} | ${d.confidence} | ${cell(d.reason)} |`,
+              "",
+            ].join("\n"));
+          ' "$OUT_DIR/decision.json"
+          exit "$code"
+
+  # Write permissions live only in this job, and it runs only for auto_merge.
+  auto-merge:
+    needs: gate
+    if: needs.gate.outputs.action == 'auto_merge'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Enable auto-merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --squash "$PR_URL"

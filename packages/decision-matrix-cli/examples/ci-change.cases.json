@@ -1,0 +1,124 @@
+{
+  "version": 1,
+  "defaults": {
+    "facts": {
+      "author": "octocat",
+      "author_association": "MEMBER",
+      "author_is_dependency_bot": false,
+      "dependency_update_type": null,
+      "from_fork": false,
+      "files_changed": 3,
+      "touches_ci": false,
+      "touches_dependencies": false,
+      "touches_sensitive": false,
+      "docs_only": false,
+      "changes_package_scripts": false,
+      "new_package_count": 0,
+      "new_packages": [],
+      "diff_truncated": false
+    },
+    "answers": {
+      "content_contains_instructions": { "type": "noul", "noul": 0.02 },
+      "suspicious_code": { "type": "noul", "noul": 0.02 },
+      "description_matches_diff": { "type": "noul", "noul": 0.95 },
+      "changes_runtime_behavior": { "type": "noul", "noul": 0.9 },
+      "risk": { "type": "score", "score": 1, "confidence": 0.9 }
+    }
+  },
+  "cases": [
+    {
+      "name": "a workflow change is held without asking the model",
+      "facts": { "touches_ci": true, "files_changed": 1 },
+      "expect": { "matched_rule": "hold-ci-config", "gate": true, "from_facts": true }
+    },
+    {
+      "name": "a postinstall script is held without asking the model",
+      "facts": { "changes_package_scripts": true, "touches_dependencies": true },
+      "expect": { "matched_rule": "hold-package-scripts", "gate": true, "from_facts": true }
+    },
+    {
+      "name": "a new package is held without asking the model",
+      "facts": { "new_package_count": 1, "new_packages": ["left-padd"], "touches_dependencies": true },
+      "expect": { "matched_rule": "hold-new-dependency", "reason": "Adds 1 new package(s)", "from_facts": true }
+    },
+    {
+      "name": "text addressing the reviewer is blocked even when every other answer passes",
+      "answers": { "content_contains_instructions": { "type": "noul", "noul": 0.8 } },
+      "expect": { "matched_rule": "hold-injection", "action": "block", "gate": true }
+    },
+    {
+      "name": "a hint of injection at the threshold is enough",
+      "answers": { "content_contains_instructions": { "type": "noul", "noul": 0.5 } },
+      "expect": { "matched_rule": "hold-injection" }
+    },
+    {
+      "name": "credential access or new egress is held",
+      "answers": { "suspicious_code": { "type": "noul", "noul": 0.4 } },
+      "expect": { "matched_rule": "hold-suspicious-code", "gate": true }
+    },
+    {
+      "name": "a diff that does not match its description is held",
+      "answers": { "description_matches_diff": { "type": "noul", "noul": 0.2 } },
+      "expect": { "matched_rule": "hold-mismatch", "gate": true }
+    },
+    {
+      "name": "git says docs-only but the model says behavior changed",
+      "facts": { "docs_only": true },
+      "answers": { "risk": { "type": "score", "score": 0, "confidence": 0.9 } },
+      "expect": { "matched_rule": "hold-mismatch", "gate": true }
+    },
+    {
+      "name": "high security risk is held",
+      "answers": { "risk": { "type": "score", "score": 2, "confidence": 0.9 } },
+      "expect": { "matched_rule": "hold-risk", "gate": true }
+    },
+    {
+      "name": "a dependabot patch update auto-merges",
+      "facts": {
+        "author": "dependabot[bot]",
+        "author_is_dependency_bot": true,
+        "dependency_update_type": "patch",
+        "touches_dependencies": true
+      },
+      "expect": { "matched_rule": "auto-merge-dependency-patch", "action": "auto_merge", "gate": false }
+    },
+    {
+      "name": "a dependabot minor update waits for a person",
+      "facts": {
+        "author": "dependabot[bot]",
+        "author_is_dependency_bot": true,
+        "dependency_update_type": "minor",
+        "touches_dependencies": true
+      },
+      "expect": { "matched_rule": null, "gate": true }
+    },
+    {
+      "name": "a docs change the model agrees with passes",
+      "facts": { "docs_only": true },
+      "answers": {
+        "risk": { "type": "score", "score": 0, "confidence": 0.9 },
+        "changes_runtime_behavior": { "type": "noul", "noul": 0.05 }
+      },
+      "expect": { "matched_rule": "pass-docs", "action": "pass", "gate": false }
+    },
+    {
+      "name": "a small change the model agrees with passes",
+      "expect": { "matched_rule": "pass-small-change", "action": "pass", "gate": false, "from_facts": false }
+    },
+    {
+      "name": "a confident model cannot pass a sensitive path",
+      "facts": { "touches_sensitive": true },
+      "expect": { "matched_rule": null, "gate": true }
+    },
+    {
+      "name": "a confident model cannot pass a diff it did not fully see",
+      "facts": { "diff_truncated": true },
+      "expect": { "matched_rule": null, "gate": true }
+    },
+    {
+      "name": "a confident model cannot pass a large change",
+      "facts": { "files_changed": 21 },
+      "expect": { "matched_rule": null, "gate": true }
+    }
+  ]
+}

@@ -1,0 +1,230 @@
+{
+  "name": "Decision Matrix — support and ops",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Support / ops routing\n\nPOST a ticket to this webhook. The Decision Matrix node sends it to your System One server with the **Support / Ops** question preset (severity, customer_impact, page_oncall) and the rules embedded on the node.\n\nCreate a **Decision Server API** credential first. Local servers can leave API Key empty. Hosted servers that require a model name: open the Decision Matrix node, add Options → Model.\n\nThe Switch branches on `action`: page, route, or escalate.",
+        "height": 260,
+        "width": 420
+      },
+      "id": "7c1a0b2e-4d55-4a1e-9c31-0a6e5f1b1004",
+      "name": "Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-20, 40]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "decision-support",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "7c1a0b2e-4d55-4a1e-9c31-0a6e5f1b1001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 340],
+      "webhookId": "decision-support"
+    },
+    {
+      "parameters": {
+        "state": "={{ $json.body.message ?? $json.body }}",
+        "questionSet": "support",
+        "rules": {
+          "version": 1,
+          "default_action": {
+            "type": "escalate",
+            "target": "human",
+            "reason": "No matching rule"
+          },
+          "thresholds": {
+            "page_threshold": 0.8,
+            "high_confidence": 0.85
+          },
+          "rules": [
+            {
+              "id": "page-oncall",
+              "description": "Page on-call for a confident high severity or a strong page signal",
+              "when": {
+                "any": [
+                  { "question": "page_oncall", "gte": "page_threshold" },
+                  {
+                    "question": "severity",
+                    "in": ["sev1", "sev2"],
+                    "confidence_gte": "high_confidence"
+                  }
+                ]
+              },
+              "action": {
+                "type": "page",
+                "target": "oncall",
+                "reason": "Severity {{answers.severity.choice}} warrants a page",
+                "gate": true
+              }
+            },
+            {
+              "id": "queue-ticket",
+              "description": "Queue everything else that has a confident severity",
+              "when": {
+                "all": [{ "question": "severity", "confidence_gte": "high_confidence" }]
+              },
+              "action": {
+                "type": "route",
+                "target": "ticket-queue",
+                "reason": "Queue as {{answers.severity.choice}}",
+                "gate": false
+              }
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000,
+          "includeFullAnswers": true,
+          "failOnNoMatch": false
+        }
+      },
+      "id": "7c1a0b2e-4d55-4a1e-9c31-0a6e5f1b1002",
+      "name": "Decision Matrix",
+      "type": "n8n-nodes-decision-matrix.decisionMatrix",
+      "typeVersion": 1,
+      "position": [520, 340],
+      "credentials": {
+        "decisionServerApi": {
+          "name": "Decision Server API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c0ffee00-0000-4000-8000-000000000001",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "page",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "page"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c0ffee00-0000-4000-8000-000000000002",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "route",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "route"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c0ffee00-0000-4000-8000-000000000003",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "escalate",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "escalate"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "7c1a0b2e-4d55-4a1e-9c31-0a6e5f1b1003",
+      "name": "Switch on action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [820, 340]
+    }
+  ],
+  "pinData": {
+    "Webhook": [
+      {
+        "json": {
+          "body": {
+            "message": "Our API integration started returning 500 errors on every request about 20 minutes ago, and we can't process any customer orders until this is fixed."
+          }
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Decision Matrix",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decision Matrix": {
+      "main": [
+        [
+          {
+            "node": "Switch on action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

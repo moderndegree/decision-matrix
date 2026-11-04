@@ -1,0 +1,51 @@
+# Policy tests: run the cases and the linter on every change to the policy.
+#
+# Copy to .github/workflows/policy-tests.yml, next to decision-gate.yml.
+# Keep ci-change.cases.json in .github/decision-matrix/ with the rules.
+#
+# This runs on pull_request, not pull_request_target, on purpose: it tests the
+# PR's own version of the rules and calls no server, so it needs no secrets.
+# The decision gate still holds the same PR (touches_ci), so a person reviews
+# the policy change, and this job shows them what it does to each case.
+
+name: Policy tests
+
+on:
+  pull_request:
+    paths:
+      - ".github/decision-matrix/**"
+      - ".github/workflows/decision-gate.yml"
+      - ".github/workflows/policy-tests.yml"
+  push:
+    branches: [main]
+    paths:
+      - ".github/decision-matrix/**"
+
+permissions:
+  contents: read
+
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Pin or vendor the CLI, as in decision-gate.yml.
+      - name: Lint the ruleset
+        run: |
+          npx --yes --package decision-matrix-cli@0.1.0 decision-matrix check --strict \
+            --rules .github/decision-matrix/ci-change.rules.json \
+            --questions .github/decision-matrix/ci-change.questions.json
+
+      - name: Run the policy cases
+        run: |
+          npx --yes --package decision-matrix-cli@0.1.0 decision-matrix test --require-coverage \
+            --rules .github/decision-matrix/ci-change.rules.json \
+            --cases .github/decision-matrix/ci-change.cases.json

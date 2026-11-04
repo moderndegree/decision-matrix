@@ -1,0 +1,544 @@
+{
+  "name": "Attack gate — runtime config",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Runtime config and flags\n\nThis sits in the flag service, before the value changes. A scanner result such as `disables_auth` belongs in `facts`. The matrix does not see the flag store directly.\n\n**Walk the examples:**\n\n1. Disable auth in prod. Do not flip the flag.\n2. Debug flag in staging. Confidence is 0.80, under 0.85, and the risk is low, so no rule matches. The default holds the flag.\n3. Status page copy. Flip the flag.\n\nPOST /webhook/attack-config.",
+        "height": 480,
+        "width": 560,
+        "color": 4
+      },
+      "id": "a1050000-0000-4000-8000-000000000001",
+      "name": "How to read this",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -20
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "a1050000-0000-4000-8000-000000000002",
+      "name": "Walk the examples",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "attack-config",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "a1050000-0000-4000-8000-000000000003",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        200,
+        760
+      ],
+      "webhookId": "attack-config"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "language": "javaScript",
+        "jsCode": "// Separate the untrusted request from facts the caller already verified.\n// The Attack gate reads state. It does not read the webhook envelope.\nconst item = $input.item.json;\nconst event = item.body && typeof item.body === 'object' && !Array.isArray(item.body) ? item.body : item;\nconst facts = event.facts && typeof event.facts === 'object' && !Array.isArray(event.facts) ? event.facts : {};\nconst request = typeof event.request === 'string' ? event.request : '';\nconst text = typeof event.text === 'string' && event.text !== '' ? event.text : request;\n\nreturn {\n  json: {\n    state: {\n      text,\n      request,\n      facts,\n      actor: event.actor ?? null,\n      action: event.action ?? null,\n      subject: event.subject ?? null,\n    },\n  },\n};\n"
+      },
+      "id": "a1050000-0000-4000-8000-000000000004",
+      "name": "Build state",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "state": "={{ JSON.stringify($json.state) }}",
+        "questionSet": "custom",
+        "questions": {
+          "intent": {
+            "type": "choice",
+            "instructions": "What this event is, based on the facts in the state",
+            "criteria": {
+              "legitimate_ops": "Expected work by someone who should be doing it",
+              "benign": "Ordinary request with no security impact",
+              "account_takeover": "Signs that someone else is using an account, session, or recovery flow",
+              "social_engineering": "A request to bypass, reset, or redirect a control or a payment",
+              "supply_chain": "A change to build, dependency, CI, or release controls",
+              "reconnaissance": "Probing for access, secrets, or weaknesses"
+            }
+          },
+          "risk": {
+            "type": "score",
+            "instructions": "How much an automated action could change security, access, or data",
+            "criteria": [
+              "No security impact and easy to reverse",
+              "Limited to one user or one record",
+              "Touches authentication, secrets, or a shared control",
+              "Bypasses a control, exposes data, or is hard to reverse"
+            ]
+          },
+          "needs_human": {
+            "type": "noul",
+            "instructions": "A person should decide before any automated action"
+          }
+        },
+        "rules": {
+          "version": 1,
+          "default_action": {
+            "type": "escalate",
+            "target": "human",
+            "reason": "No matching rule",
+            "gate": true
+          },
+          "thresholds": {
+            "high_confidence": 0.85,
+            "high_risk": 2
+          },
+          "rules": [
+            {
+              "id": "hold-hostile",
+              "description": "A confident hostile intent is blocked before any other route",
+              "when": {
+                "all": [
+                  {
+                    "question": "intent",
+                    "in": [
+                      "account_takeover",
+                      "social_engineering",
+                      "supply_chain",
+                      "reconnaissance"
+                    ],
+                    "confidence_gte": "high_confidence"
+                  }
+                ]
+              },
+              "action": {
+                "type": "block",
+                "target": "security",
+                "reason": "Hold {{answers.intent.choice}} before any automated action",
+                "gate": true
+              }
+            },
+            {
+              "id": "hold-uncertain",
+              "description": "High risk or a human-review signal goes to a person",
+              "when": {
+                "any": [
+                  {
+                    "question": "needs_human",
+                    "gte": "high_confidence"
+                  },
+                  {
+                    "question": "risk",
+                    "gte": "high_risk"
+                  }
+                ]
+              },
+              "action": {
+                "type": "escalate",
+                "target": "human",
+                "reason": "Risk or human-review signal crossed the threshold",
+                "gate": true
+              }
+            },
+            {
+              "id": "allow-legitimate",
+              "description": "Only a confident, low-risk, legitimate event can be automated",
+              "when": {
+                "all": [
+                  {
+                    "question": "intent",
+                    "in": [
+                      "legitimate_ops",
+                      "benign"
+                    ],
+                    "confidence_gte": "high_confidence"
+                  },
+                  {
+                    "question": "risk",
+                    "lt": "high_risk"
+                  }
+                ]
+              },
+              "action": {
+                "type": "allow",
+                "target": "automation",
+                "reason": "Allow {{answers.intent.choice}} below risk {{thresholds.high_risk}}",
+                "gate": false
+              }
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000,
+          "includeFullAnswers": true,
+          "failOnNoMatch": false
+        }
+      },
+      "id": "a1050000-0000-4000-8000-000000000005",
+      "name": "Attack gate",
+      "type": "n8n-nodes-decision-matrix.decisionMatrix",
+      "typeVersion": 1,
+      "position": [
+        780,
+        640
+      ],
+      "credentials": {
+        "decisionServerApi": {
+          "name": "Decision Server API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "a1050000-0000-4000-8000-000000000001",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "block",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "block"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "a1050000-0000-4000-8000-000000000002",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "escalate",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "escalate"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "a1050000-0000-4000-8000-000000000003",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "allow",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "allow"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "a1050000-0000-4000-8000-000000000006",
+      "name": "Switch on action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1100,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "include": "all",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1050000-0000-4000-8000-0000000000a1",
+              "name": "enforcement",
+              "value": "Do not flip the flag.",
+              "type": "string"
+            },
+            {
+              "id": "a1050000-0000-4000-8000-0000000000a2",
+              "name": "proceeded",
+              "value": false,
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1050000-0000-4000-8000-000000000007",
+      "name": "Do not flip the flag",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1420,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "include": "all",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1050000-0000-4000-8000-0000000000a1",
+              "name": "enforcement",
+              "value": "Do not flip the flag. A person decides.",
+              "type": "string"
+            },
+            {
+              "id": "a1050000-0000-4000-8000-0000000000a2",
+              "name": "proceeded",
+              "value": false,
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1050000-0000-4000-8000-000000000008",
+      "name": "Hold the flag",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1420,
+        680
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "include": "all",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1050000-0000-4000-8000-0000000000a1",
+              "name": "enforcement",
+              "value": "Flip the flag. gate is false.",
+              "type": "string"
+            },
+            {
+              "id": "a1050000-0000-4000-8000-0000000000a2",
+              "name": "proceeded",
+              "value": true,
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1050000-0000-4000-8000-000000000009",
+      "name": "Flip the flag",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1420,
+        900
+      ]
+    }
+  ],
+  "pinData": {
+    "Walk the examples": [
+      {
+        "json": {
+          "text": "Disable auth in prod for the checkout flag",
+          "request": "Turn off the auth requirement on the checkout flag.",
+          "actor": "flag-bot",
+          "action": "flip flag",
+          "subject": "checkout.require_auth",
+          "facts": {
+            "environment": "prod",
+            "disables_auth": true,
+            "scanner": [
+              "auth-flag"
+            ]
+          }
+        }
+      },
+      {
+        "json": {
+          "text": "Debug flag in staging for the web app",
+          "request": "Enable the debug flag for the web app.",
+          "actor": "oncall",
+          "action": "flip flag",
+          "subject": "web.debug",
+          "facts": {
+            "environment": "staging",
+            "disables_auth": false,
+            "scanner": []
+          }
+        }
+      },
+      {
+        "json": {
+          "text": "Status page copy fix for the banner",
+          "request": "Update the banner wording.",
+          "actor": "editor",
+          "action": "flip flag",
+          "subject": "status.banner",
+          "facts": {
+            "environment": "prod",
+            "disables_auth": false,
+            "scanner": []
+          }
+        }
+      }
+    ],
+    "Webhook": [
+      {
+        "json": {
+          "body": {
+            "text": "Disable auth in prod for the checkout flag",
+            "request": "Turn off the auth requirement on the checkout flag.",
+            "actor": "flag-bot",
+            "action": "flip flag",
+            "subject": "checkout.require_auth",
+            "facts": {
+              "environment": "prod",
+              "disables_auth": true,
+              "scanner": [
+                "auth-flag"
+              ]
+            }
+          }
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Walk the examples": {
+      "main": [
+        [
+          {
+            "node": "Build state",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Build state",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build state": {
+      "main": [
+        [
+          {
+            "node": "Attack gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attack gate": {
+      "main": [
+        [
+          {
+            "node": "Switch on action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch on action": {
+      "main": [
+        [
+          {
+            "node": "Do not flip the flag",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Hold the flag",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Flip the flag",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Hold the flag",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

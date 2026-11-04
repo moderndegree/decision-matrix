@@ -1,0 +1,5 @@
+{
+  "intent": { "type": "choice", "choice": "account_takeover", "confidence": 0.93 },
+  "risk": { "type": "score", "score": 3, "confidence": 0.88 },
+  "needs_human": { "type": "noul", "noul": 0.95 }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "n8n-nodes-decision-matrix",
+  "version": "0.1.0",
+  "description": "n8n community node that runs a declarative decision matrix against any System One / Jev-compatible server",
+  "license": "MIT",
+  "main": "dist/nodes/DecisionMatrix/DecisionMatrix.node.js",
+  "files": [
+    "dist"
+  ],
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "strict": true,
+    "credentials": [
+      "dist/credentials/DecisionServerApi.credentials.js"
+    ],
+    "nodes": [
+      "dist/nodes/DecisionMatrix/DecisionMatrix.node.js"
+    ]
+  },
+  "peerDependencies": {
+    "n8n-workflow": "*"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "actor": "payroll-bot",
+  "action": "change payout destination",
+  "account": "vendor-184",
+  "facts": {
+    "mfa_reset_minutes_ago": 12,
+    "source_country": "new",
+    "scanner": []
+  }
+}

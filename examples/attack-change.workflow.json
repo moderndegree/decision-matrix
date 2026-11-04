@@ -1,0 +1,862 @@
+{
+  "name": "Attack gate — repo and CI",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Repo and CI\n\nThis is the required check in front of merge. **Attack gate** runs first. A block or a hold never reaches the second matrix. Only an allow continues to **Implement gate**, which asks a different question set: what kind of change it is, and whether it is ready to ship. `delivery_risk` is not the attack `risk` score. They are separate calls.\n\n**Walk the examples:**\n\n1. A workflow permission change adds pull_request_target. The check fails.\n2. A dependency bump from a new maintainer is uncertain. A person reviews it. It does not reach Implement gate.\n3. A docs-only change is allowed, then Implement gate routes it to merge.\n4. A payments schema change is allowed through the attack gate, then held for design because the blast radius is wide.\n\nPOST /webhook/attack-change. Fail the check is exit-before-merge. Merge the change is the only path where `proceeded` is true.",
+        "height": 560,
+        "width": 560,
+        "color": 4
+      },
+      "id": "a1030000-0000-4000-8000-000000000001",
+      "name": "How to read this",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -20
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "a1030000-0000-4000-8000-000000000002",
+      "name": "Walk the examples",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "attack-change",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "a1030000-0000-4000-8000-000000000003",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        200,
+        760
+      ],
+      "webhookId": "attack-change"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "language": "javaScript",
+        "jsCode": "// Separate the untrusted request from facts the caller already verified.\n// The Attack gate reads state. It does not read the webhook envelope.\nconst item = $input.item.json;\nconst event = item.body && typeof item.body === 'object' && !Array.isArray(item.body) ? item.body : item;\nconst facts = event.facts && typeof event.facts === 'object' && !Array.isArray(event.facts) ? event.facts : {};\nconst request = typeof event.request === 'string' ? event.request : '';\nconst text = typeof event.text === 'string' && event.text !== '' ? event.text : request;\n\nreturn {\n  json: {\n    state: {\n      text,\n      request,\n      facts,\n      actor: event.actor ?? null,\n      action: event.action ?? null,\n      subject: event.subject ?? null,\n    },\n  },\n};\n"
+      },
+      "id": "a1030000-0000-4000-8000-000000000004",
+      "name": "Build state",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "state": "={{ JSON.stringify($json.state) }}",
+        "questionSet": "custom",
+        "questions": {
+          "intent": {
+            "type": "choice",
+            "instructions": "What this event is, based on the facts in the state",
+            "criteria": {
+              "legitimate_ops": "Expected work by someone who should be doing it",
+              "benign": "Ordinary request with no security impact",
+              "account_takeover": "Signs that someone else is using an account, session, or recovery flow",
+              "social_engineering": "A request to bypass, reset, or redirect a control or a payment",
+              "supply_chain": "A change to build, dependency, CI, or release controls",
+              "reconnaissance": "Probing for access, secrets, or weaknesses"
+            }
+          },
+          "risk": {
+            "type": "score",
+            "instructions": "How much an automated action could change security, access, or data",
+            "criteria": [
+              "No security impact and easy to reverse",
+              "Limited to one user or one record",
+              "Touches authentication, secrets, or a shared control",
+              "Bypasses a control, exposes data, or is hard to reverse"
+            ]
+          },
+          "needs_human": {
+            "type": "noul",
+            "instructions": "A person should decide before any automated action"
+          }
+        },
+        "rules": {
+          "version": 1,
+          "default_action": {
+            "type": "escalate",
+            "target": "human",
+            "reason": "No matching rule",
+            "gate": true
+          },
+          "thresholds": {
+            "high_confidence": 0.85,
+            "high_risk": 2
+          },
+          "rules": [
+            {
+              "id": "hold-hostile",
+              "description": "A confident hostile intent is blocked before any other route",
+              "when": {
+                "all": [
+                  {
+                    "question": "intent",
+                    "in": [
+                      "account_takeover",
+                      "social_engineering",
+                      "supply_chain",
+                      "reconnaissance"
+                    ],
+                    "confidence_gte": "high_confidence"
+                  }
+                ]
+              },
+              "action": {
+                "type": "block",
+                "target": "security",
+                "reason": "Hold {{answers.intent.choice}} before any automated action",
+                "gate": true
+              }
+            },
+            {
+              "id": "hold-uncertain",
+              "description": "High risk or a human-review signal goes to a person",
+              "when": {
+                "any": [
+                  {
+                    "question": "needs_human",
+                    "gte": "high_confidence"
+                  },
+                  {
+                    "question": "risk",
+                    "gte": "high_risk"
+                  }
+                ]
+              },
+              "action": {
+                "type": "escalate",
+                "target": "human",
+                "reason": "Risk or human-review signal crossed the threshold",
+                "gate": true
+              }
+            },
+            {
+              "id": "allow-legitimate",
+              "description": "Only a confident, low-risk, legitimate event can be automated",
+              "when": {
+                "all": [
+                  {
+                    "question": "intent",
+                    "in": [
+                      "legitimate_ops",
+                      "benign"
+                    ],
+                    "confidence_gte": "high_confidence"
+                  },
+                  {
+                    "question": "risk",
+                    "lt": "high_risk"
+                  }
+                ]
+              },
+              "action": {
+                "type": "allow",
+                "target": "automation",
+                "reason": "Allow {{answers.intent.choice}} below risk {{thresholds.high_risk}}",
+                "gate": false
+              }
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000,
+          "includeFullAnswers": true,
+          "failOnNoMatch": false
+        }
+      },
+      "id": "a1030000-0000-4000-8000-000000000005",
+      "name": "Attack gate",
+      "type": "n8n-nodes-decision-matrix.decisionMatrix",
+      "typeVersion": 1,
+      "position": [
+        780,
+        640
+      ],
+      "credentials": {
+        "decisionServerApi": {
+          "name": "Decision Server API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "a1030000-0000-4000-8000-000000000001",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "block",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "block"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "a1030000-0000-4000-8000-000000000002",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "escalate",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "escalate"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "a1030000-0000-4000-8000-000000000003",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "allow",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "allow"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "a1030000-0000-4000-8000-000000000006",
+      "name": "Switch on action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1100,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "include": "all",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1030000-0000-4000-8000-0000000000a1",
+              "name": "enforcement",
+              "value": "Fail the required check. Do not merge.",
+              "type": "string"
+            },
+            {
+              "id": "a1030000-0000-4000-8000-0000000000a2",
+              "name": "proceeded",
+              "value": false,
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1030000-0000-4000-8000-000000000007",
+      "name": "Fail the check",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1420,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "include": "all",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1030000-0000-4000-8000-0000000000a1",
+              "name": "enforcement",
+              "value": "Do not merge. A person reviews the diff.",
+              "type": "string"
+            },
+            {
+              "id": "a1030000-0000-4000-8000-0000000000a2",
+              "name": "proceeded",
+              "value": false,
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1030000-0000-4000-8000-000000000008",
+      "name": "Ask a person",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1420,
+        680
+      ]
+    },
+    {
+      "parameters": {
+        "state": "={{ JSON.stringify($('Build state').item.json.state) }}",
+        "questionSet": "custom",
+        "questions": {
+          "change_type": {
+            "type": "choice",
+            "instructions": "What kind of change this is, based on the facts in the state",
+            "criteria": {
+              "feature": "New behavior or a structural change",
+              "bugfix": "Correct broken behavior",
+              "refactor": "Restructure without a behavior change",
+              "docs": "Documentation only",
+              "chore": "Tooling or maintenance"
+            }
+          },
+          "delivery_risk": {
+            "type": "score",
+            "instructions": "How wide the blast radius is if this change ships",
+            "criteria": [
+              "One line or docs",
+              "One service, easy to reverse",
+              "Shared data or a migration",
+              "Hard to reverse or customer-facing"
+            ]
+          },
+          "needs_design": {
+            "type": "noul",
+            "instructions": "A design review should happen before implementation"
+          },
+          "ready_to_implement": {
+            "type": "noul",
+            "instructions": "The change is specific enough to implement"
+          }
+        },
+        "rules": {
+          "version": 1,
+          "default_action": {
+            "type": "escalate",
+            "target": "human",
+            "reason": "No matching rule",
+            "gate": true
+          },
+          "thresholds": {
+            "high_confidence": 0.85,
+            "medium_confidence": 0.7,
+            "wide_blast": 2
+          },
+          "rules": [
+            {
+              "id": "needs-design",
+              "description": "Unclear or wide work waits for design",
+              "when": {
+                "any": [
+                  {
+                    "question": "needs_design",
+                    "gte": "medium_confidence"
+                  },
+                  {
+                    "question": "delivery_risk",
+                    "gte": "wide_blast"
+                  },
+                  {
+                    "question": "ready_to_implement",
+                    "lt": 0.4
+                  }
+                ]
+              },
+              "action": {
+                "type": "review",
+                "target": "design",
+                "reason": "Change needs design review before implementation",
+                "gate": true
+              }
+            },
+            {
+              "id": "ready-implementer",
+              "description": "Specific, narrow work can merge",
+              "when": {
+                "all": [
+                  {
+                    "question": "ready_to_implement",
+                    "gte": "high_confidence"
+                  },
+                  {
+                    "question": "delivery_risk",
+                    "lt": "wide_blast"
+                  },
+                  {
+                    "question": "change_type",
+                    "in": [
+                      "feature",
+                      "bugfix",
+                      "refactor",
+                      "docs",
+                      "chore"
+                    ],
+                    "confidence_gte": "medium_confidence"
+                  }
+                ]
+              },
+              "action": {
+                "type": "route",
+                "target": "implementer",
+                "reason": "Ready to implement as {{answers.change_type.choice}}",
+                "gate": false
+              }
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000,
+          "includeFullAnswers": true,
+          "failOnNoMatch": false
+        }
+      },
+      "id": "a1030000-0000-4000-8000-000000000009",
+      "name": "Implement gate",
+      "type": "n8n-nodes-decision-matrix.decisionMatrix",
+      "typeVersion": 1,
+      "position": [
+        1420,
+        900
+      ],
+      "credentials": {
+        "decisionServerApi": {
+          "name": "Decision Server API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "a1030000-0000-4000-8000-000000000001",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "review",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "review"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "a1030000-0000-4000-8000-000000000002",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "route",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "route"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "a1030000-0000-4000-8000-000000000003",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "escalate",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "escalate"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "a1030000-0000-4000-8000-000000000010",
+      "name": "Switch on implement",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1740,
+        900
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "include": "all",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1030000-0000-4000-8000-0000000000a1",
+              "name": "enforcement",
+              "value": "Hold for design. The attack gate allowed it, and the change is still wide.",
+              "type": "string"
+            },
+            {
+              "id": "a1030000-0000-4000-8000-0000000000a2",
+              "name": "proceeded",
+              "value": false,
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1030000-0000-4000-8000-000000000011",
+      "name": "Hold for design",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2060,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "include": "all",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1030000-0000-4000-8000-0000000000a1",
+              "name": "enforcement",
+              "value": "Merge the change. Both gates are open.",
+              "type": "string"
+            },
+            {
+              "id": "a1030000-0000-4000-8000-0000000000a2",
+              "name": "proceeded",
+              "value": true,
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1030000-0000-4000-8000-000000000012",
+      "name": "Merge the change",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2060,
+        980
+      ]
+    }
+  ],
+  "pinData": {
+    "Walk the examples": [
+      {
+        "json": {
+          "text": "Workflow permission change adds pull_request_target",
+          "request": "Update the release workflow so forks can publish.",
+          "actor": "pr-1881",
+          "action": "merge",
+          "subject": ".github/workflows/release.yml",
+          "facts": {
+            "paths": [
+              ".github/workflows/release.yml"
+            ],
+            "permission_diff": "pull_request_target",
+            "scanner": [
+              "workflow-permission"
+            ]
+          }
+        }
+      },
+      {
+        "json": {
+          "text": "Dependency bump of the lockfile by a new maintainer",
+          "request": "Bump the HTTP client in the lockfile.",
+          "actor": "pr-1904",
+          "action": "merge",
+          "subject": "package-lock.json",
+          "facts": {
+            "paths": [
+              "package-lock.json"
+            ],
+            "maintainer": "new",
+            "scanner": []
+          }
+        }
+      },
+      {
+        "json": {
+          "text": "Docs only change on the status page",
+          "request": "Fix the status page wording.",
+          "actor": "pr-1910",
+          "action": "merge",
+          "subject": "docs/status.md",
+          "facts": {
+            "paths": [
+              "docs/status.md"
+            ],
+            "scanner": []
+          }
+        }
+      },
+      {
+        "json": {
+          "text": "Payments schema change for the ledger tables",
+          "request": "Add a ledger column and backfill it.",
+          "actor": "pr-1914",
+          "action": "merge",
+          "subject": "db/ledger.sql",
+          "facts": {
+            "paths": [
+              "db/ledger.sql"
+            ],
+            "scanner": []
+          }
+        }
+      }
+    ],
+    "Webhook": [
+      {
+        "json": {
+          "body": {
+            "text": "Workflow permission change adds pull_request_target",
+            "request": "Update the release workflow so forks can publish.",
+            "actor": "pr-1881",
+            "action": "merge",
+            "subject": ".github/workflows/release.yml",
+            "facts": {
+              "paths": [
+                ".github/workflows/release.yml"
+              ],
+              "permission_diff": "pull_request_target",
+              "scanner": [
+                "workflow-permission"
+              ]
+            }
+          }
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Walk the examples": {
+      "main": [
+        [
+          {
+            "node": "Build state",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Build state",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build state": {
+      "main": [
+        [
+          {
+            "node": "Attack gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attack gate": {
+      "main": [
+        [
+          {
+            "node": "Switch on action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch on action": {
+      "main": [
+        [
+          {
+            "node": "Fail the check",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ask a person",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Implement gate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ask a person",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Implement gate": {
+      "main": [
+        [
+          {
+            "node": "Switch on implement",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch on implement": {
+      "main": [
+        [
+          {
+            "node": "Hold for design",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge the change",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ask a person",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ask a person",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

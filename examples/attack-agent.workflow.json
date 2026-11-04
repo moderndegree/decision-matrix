@@ -1,0 +1,540 @@
+{
+  "name": "Attack gate — agent tool call",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Agent and tool gateway\n\nThis sits in the tool gateway, before the call runs. The proposed tool and redacted arguments are the event. The fallback output of the switch also lands on Deny and ask a person, so an action the switch does not name does not run.\n\nIf Attack gate errors, the workflow stops and Run the tool does not execute. A failed decision is not an allow.\n\n**Walk the examples:**\n\n1. The agent wants to change a payout destination. Denied, and the event goes to security.\n2. The agent wants to run a shell. The intent is not confident enough to block, and the risk is high. The tool is denied and a person decides.\n3. The agent wants to read the public handbook. The tool runs.\n\nPOST /webhook/attack-agent.",
+        "height": 500,
+        "width": 560,
+        "color": 4
+      },
+      "id": "a1070000-0000-4000-8000-000000000001",
+      "name": "How to read this",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -20
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "a1070000-0000-4000-8000-000000000002",
+      "name": "Walk the examples",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "attack-agent",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "a1070000-0000-4000-8000-000000000003",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        200,
+        760
+      ],
+      "webhookId": "attack-agent"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "language": "javaScript",
+        "jsCode": "// Separate the untrusted request from facts the caller already verified.\n// The Attack gate reads state. It does not read the webhook envelope.\nconst item = $input.item.json;\nconst event = item.body && typeof item.body === 'object' && !Array.isArray(item.body) ? item.body : item;\nconst facts = event.facts && typeof event.facts === 'object' && !Array.isArray(event.facts) ? event.facts : {};\nconst request = typeof event.request === 'string' ? event.request : '';\nconst text = typeof event.text === 'string' && event.text !== '' ? event.text : request;\n\nreturn {\n  json: {\n    state: {\n      text,\n      request,\n      facts,\n      actor: event.actor ?? null,\n      action: event.action ?? null,\n      subject: event.subject ?? null,\n    },\n  },\n};\n"
+      },
+      "id": "a1070000-0000-4000-8000-000000000004",
+      "name": "Build state",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "state": "={{ JSON.stringify($json.state) }}",
+        "questionSet": "custom",
+        "questions": {
+          "intent": {
+            "type": "choice",
+            "instructions": "What this event is, based on the facts in the state",
+            "criteria": {
+              "legitimate_ops": "Expected work by someone who should be doing it",
+              "benign": "Ordinary request with no security impact",
+              "account_takeover": "Signs that someone else is using an account, session, or recovery flow",
+              "social_engineering": "A request to bypass, reset, or redirect a control or a payment",
+              "supply_chain": "A change to build, dependency, CI, or release controls",
+              "reconnaissance": "Probing for access, secrets, or weaknesses"
+            }
+          },
+          "risk": {
+            "type": "score",
+            "instructions": "How much an automated action could change security, access, or data",
+            "criteria": [
+              "No security impact and easy to reverse",
+              "Limited to one user or one record",
+              "Touches authentication, secrets, or a shared control",
+              "Bypasses a control, exposes data, or is hard to reverse"
+            ]
+          },
+          "needs_human": {
+            "type": "noul",
+            "instructions": "A person should decide before any automated action"
+          }
+        },
+        "rules": {
+          "version": 1,
+          "default_action": {
+            "type": "escalate",
+            "target": "human",
+            "reason": "No matching rule",
+            "gate": true
+          },
+          "thresholds": {
+            "high_confidence": 0.85,
+            "high_risk": 2
+          },
+          "rules": [
+            {
+              "id": "hold-hostile",
+              "description": "A confident hostile intent is blocked before any other route",
+              "when": {
+                "all": [
+                  {
+                    "question": "intent",
+                    "in": [
+                      "account_takeover",
+                      "social_engineering",
+                      "supply_chain",
+                      "reconnaissance"
+                    ],
+                    "confidence_gte": "high_confidence"
+                  }
+                ]
+              },
+              "action": {
+                "type": "block",
+                "target": "security",
+                "reason": "Hold {{answers.intent.choice}} before any automated action",
+                "gate": true
+              }
+            },
+            {
+              "id": "hold-uncertain",
+              "description": "High risk or a human-review signal goes to a person",
+              "when": {
+                "any": [
+                  {
+                    "question": "needs_human",
+                    "gte": "high_confidence"
+                  },
+                  {
+                    "question": "risk",
+                    "gte": "high_risk"
+                  }
+                ]
+              },
+              "action": {
+                "type": "escalate",
+                "target": "human",
+                "reason": "Risk or human-review signal crossed the threshold",
+                "gate": true
+              }
+            },
+            {
+              "id": "allow-legitimate",
+              "description": "Only a confident, low-risk, legitimate event can be automated",
+              "when": {
+                "all": [
+                  {
+                    "question": "intent",
+                    "in": [
+                      "legitimate_ops",
+                      "benign"
+                    ],
+                    "confidence_gte": "high_confidence"
+                  },
+                  {
+                    "question": "risk",
+                    "lt": "high_risk"
+                  }
+                ]
+              },
+              "action": {
+                "type": "allow",
+                "target": "automation",
+                "reason": "Allow {{answers.intent.choice}} below risk {{thresholds.high_risk}}",
+                "gate": false
+              }
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000,
+          "includeFullAnswers": true,
+          "failOnNoMatch": false
+        }
+      },
+      "id": "a1070000-0000-4000-8000-000000000005",
+      "name": "Attack gate",
+      "type": "n8n-nodes-decision-matrix.decisionMatrix",
+      "typeVersion": 1,
+      "position": [
+        780,
+        640
+      ],
+      "credentials": {
+        "decisionServerApi": {
+          "name": "Decision Server API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "a1070000-0000-4000-8000-000000000001",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "block",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "block"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "a1070000-0000-4000-8000-000000000002",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "escalate",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "escalate"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "a1070000-0000-4000-8000-000000000003",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "allow",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "allow"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "a1070000-0000-4000-8000-000000000006",
+      "name": "Switch on action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1100,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "include": "all",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1070000-0000-4000-8000-0000000000a1",
+              "name": "enforcement",
+              "value": "Deny the tool and send the event to security.",
+              "type": "string"
+            },
+            {
+              "id": "a1070000-0000-4000-8000-0000000000a2",
+              "name": "proceeded",
+              "value": false,
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1070000-0000-4000-8000-000000000007",
+      "name": "Deny the tool",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1420,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "include": "all",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1070000-0000-4000-8000-0000000000a1",
+              "name": "enforcement",
+              "value": "Deny the tool. A person decides before any call.",
+              "type": "string"
+            },
+            {
+              "id": "a1070000-0000-4000-8000-0000000000a2",
+              "name": "proceeded",
+              "value": false,
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1070000-0000-4000-8000-000000000008",
+      "name": "Deny and ask a person",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1420,
+        680
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "include": "all",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1070000-0000-4000-8000-0000000000a1",
+              "name": "enforcement",
+              "value": "Run the tool. gate is false.",
+              "type": "string"
+            },
+            {
+              "id": "a1070000-0000-4000-8000-0000000000a2",
+              "name": "proceeded",
+              "value": true,
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1070000-0000-4000-8000-000000000009",
+      "name": "Run the tool",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1420,
+        900
+      ]
+    }
+  ],
+  "pinData": {
+    "Walk the examples": [
+      {
+        "json": {
+          "text": "Agent tool call to change the payout destination",
+          "request": "Call payments.update_destination with the new account.",
+          "actor": "agent:payroll",
+          "action": "payments.update_destination",
+          "subject": "vendor-184",
+          "facts": {
+            "tool": "payments.update_destination",
+            "mfa_reset_minutes_ago": 12,
+            "scanner": []
+          }
+        }
+      },
+      {
+        "json": {
+          "text": "Agent tool call to run a shell",
+          "request": "Run a shell in the repo to inspect the workflow.",
+          "actor": "agent:release",
+          "action": "shell",
+          "subject": "repo",
+          "facts": {
+            "tool": "shell",
+            "args_redacted": true,
+            "scanner": []
+          }
+        }
+      },
+      {
+        "json": {
+          "text": "Agent tool call to read the public handbook",
+          "request": "Read the public handbook page.",
+          "actor": "agent:help",
+          "action": "docs.read",
+          "subject": "handbook",
+          "facts": {
+            "tool": "docs.read",
+            "public": true,
+            "scanner": []
+          }
+        }
+      }
+    ],
+    "Webhook": [
+      {
+        "json": {
+          "body": {
+            "text": "Agent tool call to change the payout destination",
+            "request": "Call payments.update_destination with the new account.",
+            "actor": "agent:payroll",
+            "action": "payments.update_destination",
+            "subject": "vendor-184",
+            "facts": {
+              "tool": "payments.update_destination",
+              "mfa_reset_minutes_ago": 12,
+              "scanner": []
+            }
+          }
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Walk the examples": {
+      "main": [
+        [
+          {
+            "node": "Build state",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Build state",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build state": {
+      "main": [
+        [
+          {
+            "node": "Attack gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attack gate": {
+      "main": [
+        [
+          {
+            "node": "Switch on action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch on action": {
+      "main": [
+        [
+          {
+            "node": "Deny the tool",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Deny and ask a person",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Run the tool",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Deny and ask a person",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "decision-matrix-systemone/schema/response.schema.json",
+  "title": "System One response",
+  "description": "Canonical success body. decision-matrix-systemone also accepts the aliases listed in PROTOCOL.md: missing type, numeric strings, probability arrays, usage field aliases, and an answers map nested under data or result.",
+  "type": "object",
+  "required": ["answers"],
+  "properties": {
+    "model": { "type": "string" },
+    "answers": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/answer" }
+    },
+    "usage": { "$ref": "#/$defs/usage" }
+  },
+  "$defs": {
+    "answer": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "enum": ["choice", "noul", "score"] },
+        "choice": { "type": "string" },
+        "noul": { "type": "number", "minimum": 0, "maximum": 1 },
+        "score": { "type": "number" },
+        "confidence": { "type": "number" },
+        "probabilities": {
+          "type": "object",
+          "additionalProperties": { "type": "number" }
+        }
+      }
+    },
+    "usage": {
+      "type": "object",
+      "properties": {
+        "input_tokens": { "type": "integer", "minimum": 0 },
+        "output_tokens": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

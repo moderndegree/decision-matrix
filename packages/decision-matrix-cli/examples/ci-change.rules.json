@@ -1,0 +1,257 @@
+{
+  "version": 1,
+  "open_gate_requires_facts": true,
+  "default_action": {
+    "type": "hold",
+    "target": "human",
+    "reason": "No rule passed this change",
+    "gate": true
+  },
+  "thresholds": {
+    "high_confidence": 0.85,
+    "injection": 0.5,
+    "suspicion": 0.3,
+    "high_risk": 2,
+    "max_files": 20
+  },
+  "rules": [
+    {
+      "id": "hold-ci-config",
+      "description": "CI, build, release, or policy files changed. Facts only, so the model is not asked.",
+      "when": {
+        "all": [
+          {
+            "fact": "touches_ci",
+            "eq": true
+          }
+        ]
+      },
+      "action": {
+        "type": "hold",
+        "target": "security",
+        "reason": "Changes CI, build, release, or review policy files",
+        "gate": true
+      }
+    },
+    {
+      "id": "hold-package-scripts",
+      "description": "Install and build scripts run on developer machines and runners",
+      "when": {
+        "all": [
+          {
+            "fact": "changes_package_scripts",
+            "eq": true
+          }
+        ]
+      },
+      "action": {
+        "type": "hold",
+        "target": "security",
+        "reason": "Changes package scripts that run at install or build time",
+        "gate": true
+      }
+    },
+    {
+      "id": "hold-new-dependency",
+      "description": "A new package name is a supply-chain decision for a person",
+      "when": {
+        "all": [
+          {
+            "fact": "new_package_count",
+            "gt": 0
+          }
+        ]
+      },
+      "action": {
+        "type": "hold",
+        "target": "security",
+        "reason": "Adds {{facts.new_package_count}} new package(s)",
+        "gate": true
+      }
+    },
+    {
+      "id": "hold-injection",
+      "description": "Any sign that the PR text or code comments address the reviewer or a model",
+      "when": {
+        "all": [
+          {
+            "question": "content_contains_instructions",
+            "gte": "injection"
+          }
+        ]
+      },
+      "action": {
+        "type": "block",
+        "target": "security",
+        "reason": "The change text tries to instruct the reviewer",
+        "gate": true
+      }
+    },
+    {
+      "id": "hold-suspicious-code",
+      "description": "Obfuscation, credential access, new egress, or build-time execution",
+      "when": {
+        "all": [
+          {
+            "question": "suspicious_code",
+            "gte": "suspicion"
+          }
+        ]
+      },
+      "action": {
+        "type": "hold",
+        "target": "security",
+        "reason": "The diff contains code a person should inspect",
+        "gate": true
+      }
+    },
+    {
+      "id": "hold-mismatch",
+      "description": "The diff does not match its description, or the model disagrees with a verified fact. Either the change hides something or the model was steered.",
+      "when": {
+        "any": [
+          {
+            "question": "description_matches_diff",
+            "lt": 0.5
+          },
+          {
+            "all": [
+              {
+                "fact": "docs_only",
+                "eq": true
+              },
+              {
+                "question": "changes_runtime_behavior",
+                "gte": 0.5
+              }
+            ]
+          }
+        ]
+      },
+      "action": {
+        "type": "hold",
+        "target": "human",
+        "reason": "The description, the diff, and the facts do not agree",
+        "gate": true
+      }
+    },
+    {
+      "id": "hold-risk",
+      "when": {
+        "all": [
+          {
+            "question": "risk",
+            "gte": "high_risk"
+          }
+        ]
+      },
+      "action": {
+        "type": "hold",
+        "target": "human",
+        "reason": "Security risk {{answers.risk.score}} is at or above {{thresholds.high_risk}}",
+        "gate": true
+      }
+    },
+    {
+      "id": "auto-merge-dependency-patch",
+      "description": "A dependency bot patch update with nothing else in the diff",
+      "when": {
+        "all": [
+          {
+            "fact": "author_is_dependency_bot",
+            "eq": true
+          },
+          {
+            "fact": "dependency_update_type",
+            "eq": "patch"
+          },
+          {
+            "fact": "diff_truncated",
+            "eq": false
+          },
+          {
+            "question": "suspicious_code",
+            "lt": 0.1
+          },
+          {
+            "question": "description_matches_diff",
+            "gte": "high_confidence"
+          }
+        ]
+      },
+      "action": {
+        "type": "auto_merge",
+        "target": "automation",
+        "reason": "Patch update from {{facts.author}} with nothing unexpected in the diff",
+        "gate": false
+      }
+    },
+    {
+      "id": "pass-docs",
+      "when": {
+        "all": [
+          {
+            "fact": "docs_only",
+            "eq": true
+          },
+          {
+            "fact": "diff_truncated",
+            "eq": false
+          },
+          {
+            "question": "risk",
+            "lt": 1
+          }
+        ]
+      },
+      "action": {
+        "type": "pass",
+        "target": "review",
+        "reason": "Documentation only",
+        "gate": false
+      }
+    },
+    {
+      "id": "pass-small-change",
+      "description": "Small, fully seen, outside sensitive paths, and the model agrees",
+      "when": {
+        "all": [
+          {
+            "fact": "touches_sensitive",
+            "eq": false
+          },
+          {
+            "fact": "touches_dependencies",
+            "eq": false
+          },
+          {
+            "fact": "diff_truncated",
+            "eq": false
+          },
+          {
+            "fact": "files_changed",
+            "lte": "max_files"
+          },
+          {
+            "question": "risk",
+            "lt": "high_risk"
+          },
+          {
+            "question": "description_matches_diff",
+            "gte": "high_confidence"
+          },
+          {
+            "question": "suspicious_code",
+            "lt": 0.1
+          }
+        ]
+      },
+      "action": {
+        "type": "pass",
+        "target": "review",
+        "reason": "Small change outside sensitive paths at risk {{answers.risk.score}}",
+        "gate": false
+      }
+    }
+  ]
+}

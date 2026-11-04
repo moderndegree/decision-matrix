@@ -1,0 +1,2064 @@
+{
+  "name": "SDLC with a feedback loop",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Run the lifecycle\n\nClick **Execute workflow**. It starts from **Change opened** and runs four pinned changes through one intake policy. The ones that ship go through the release gate. Read each node's output by title.\n\n1. README typo ships, the release is healthy, and the loop closes.\n2. Footer typo ships, production is a little worse, and the loop watches it.\n3. Payments migration is held for design, the design is signed off, the error rate spikes, and the loop reopens it as a checkout outage. On-call is paged. The recovery signal closes it.\n4. The unsure CSV bug stops at a person.\n\n**Walk the lifecycle** carries the same four pins. **Deploy alert** is pinned with a checkout-down signal, and **Error-budget poll** fires a healthy probe. Pick either from the trigger menu. Both finish in the editor.\n\nThe stand-in picks answers from phrases in the state. The rules pick the action.",
+        "height": 520,
+        "width": 520,
+        "color": 4
+      },
+      "id": "c1d0e6a0-0001-4000-8000-000000000002",
+      "name": "How to read this",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -20
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Three rulesets, one vocabulary\n\n**Intake policy.** Page a confident incident whose blast radius is at least `wide_blast` (2). Hold when design is at least `medium_confidence` (0.7) or the blast radius is that wide. Ship a confident narrow bugfix or feature. Anything else goes to a person.\n\n**Design gate.** Approval at least `high_confidence` (0.85), residual risk below `wide_blast`, and ready to implement at least `medium_confidence` → an implementer. Otherwise a person.\n\n**Release gate.** Roll back and reopen when the signal is degraded or an outage, the release caused it, rollback is safe, and customer impact is at least `wide_blast`. Page a confident outage that did not take that path. Close a healthy signal. Watch a narrow degradation.\n\nThe same threshold names are on every node. A Thresholds row on one node moves that number for that stage only.",
+        "height": 420,
+        "width": 560,
+        "color": 5
+      },
+      "id": "c1d0e6a0-0001-4000-8000-000000000003",
+      "name": "The policy",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        520,
+        -20
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## What arms production\n\n**Change opened** is `POST /webhook/sdlc-intake`. Body fields: `title`, `state`, `design_state`, `monitor_state`, `reopen_state`, `reopen_monitor`. The editor pin is the four changes, so Execute runs them instead of waiting for a test call.\n\n**Deploy alert** is `POST /webhook/sdlc-monitor`. Body field `state` is the signal. The editor pin is a checkout-down alert, which pages. A live spike with `reopen_state` rolls back into the intake policy.\n\n**Error-budget poll** is a schedule, every hour. In the editor it sends a healthy probe through the release gate immediately.\n\nThe workflow is inactive, so the schedule and both webhooks are not armed. Activate it when you want those triggers live. A live POST uses the request body. From this machine the base is http://localhost:5678.",
+        "height": 420,
+        "width": 540,
+        "color": 6
+      },
+      "id": "c1d0e6a0-0001-4000-8000-000000000004",
+      "name": "Monitoring triggers",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1120,
+        -20
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## The release comes back as a change\n\n**Reopen the change** connects back to **Change context**. The new state is the production failure. The next monitor text is the recovery check. `pass` goes from 0 to 1.\n\nThe first pass of the payments migration rolls back. The second pass is the checkout outage: page, then the recovery signal closes. A second rollback would stop on **Loop stopped** instead of opening another pass.\n\nAn incident that starts as an outage takes **Page on-call** and still reaches the release gate, so a page is not the end of the loop.",
+        "height": 420,
+        "width": 500
+      },
+      "id": "c1d0e6a0-0001-4000-8000-000000000005",
+      "name": "The feedback loop",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1700,
+        -20
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "c1d0e6a0-0001-4000-8000-000000000006",
+      "name": "Walk the lifecycle",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "sdlc-intake",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "c1d0e6a0-0001-4000-8000-000000000007",
+      "name": "Change opened",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        200,
+        740
+      ],
+      "webhookId": "sdlc-intake"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "c1d0e6a0-0001-4000-8000-000000000008",
+      "name": "Error-budget poll",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        200,
+        1180
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "sdlc-monitor",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "c1d0e6a0-0001-4000-8000-000000000009",
+      "name": "Deploy alert",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        200,
+        1400
+      ],
+      "webhookId": "sdlc-monitor"
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "include": "all",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1d0e6a0-0001-4000-8000-00000000000a",
+              "name": "title",
+              "value": "={{ $json.title !== undefined && $json.title !== null ? $json.title : ($json.body && $json.body.title !== undefined && $json.body.title !== null ? $json.body.title : \"Change\") }}",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-00000000000b",
+              "name": "state",
+              "value": "={{ $json.state !== undefined && $json.state !== null ? $json.state : ($json.body && $json.body.state !== undefined && $json.body.state !== null ? $json.body.state : ($json.body && $json.body.message !== undefined && $json.body.message !== null ? $json.body.message : \"\")) }}",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-00000000000c",
+              "name": "design_state",
+              "value": "={{ $json.design_state !== undefined && $json.design_state !== null ? $json.design_state : ($json.body && $json.body.design_state !== undefined && $json.body.design_state !== null ? $json.body.design_state : \"\") }}",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-00000000000d",
+              "name": "monitor_state",
+              "value": "={{ $json.monitor_state !== undefined && $json.monitor_state !== null ? $json.monitor_state : ($json.body && $json.body.monitor_state !== undefined && $json.body.monitor_state !== null ? $json.body.monitor_state : \"\") }}",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-00000000000e",
+              "name": "reopen_state",
+              "value": "={{ $json.reopen_state !== undefined && $json.reopen_state !== null ? $json.reopen_state : ($json.body && $json.body.reopen_state !== undefined && $json.body.reopen_state !== null ? $json.body.reopen_state : \"\") }}",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-00000000000f",
+              "name": "reopen_monitor",
+              "value": "={{ $json.reopen_monitor !== undefined && $json.reopen_monitor !== null ? $json.reopen_monitor : ($json.body && $json.body.reopen_monitor !== undefined && $json.body.reopen_monitor !== null ? $json.body.reopen_monitor : \"\") }}",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-000000000010",
+              "name": "pass",
+              "value": "={{ $json.pass !== undefined && $json.pass !== null ? $json.pass : ($json.body && $json.body.pass !== undefined && $json.body.pass !== null ? $json.body.pass : 0) }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c1d0e6a0-0001-4000-8000-000000000011",
+      "name": "Normalize change",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        480,
+        620
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "c1d0e6a0-0001-4000-8000-000000000012",
+      "name": "Change context",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        760,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "state": "={{ $json.state }}",
+        "questionSet": "custom",
+        "questions": {
+          "work_type": {
+            "type": "choice",
+            "instructions": "What kind of work is this",
+            "criteria": {
+              "incident": "Customers are blocked or a service is down",
+              "bugfix": "Correct broken behavior, small and specific",
+              "feature": "New behavior or a structural change",
+              "unclear": "The request does not say what to do"
+            }
+          },
+          "blast_radius": {
+            "type": "score",
+            "instructions": "How wide is the blast radius if we act on this",
+            "criteria": [
+              "One file or a copy change",
+              "One feature, easy to reverse",
+              "Shared data or several services",
+              "Payments, security, or hard to reverse"
+            ]
+          },
+          "needs_design": {
+            "type": "noul",
+            "instructions": "A design review should happen before anyone implements this"
+          },
+          "needs_human": {
+            "type": "noul",
+            "instructions": "A person should look at this before any automated action"
+          }
+        },
+        "rules": {
+          "version": 1,
+          "default_action": {
+            "type": "escalate",
+            "target": "human",
+            "reason": "Not confident enough to act on {{answers.work_type.choice}} ({{answers.work_type.confidence}})"
+          },
+          "thresholds": {
+            "high_confidence": 0.85,
+            "medium_confidence": 0.7,
+            "wide_blast": 2
+          },
+          "rules": [
+            {
+              "id": "page-incident",
+              "description": "A confident incident with a wide blast radius pages on-call",
+              "when": {
+                "all": [
+                  {
+                    "question": "work_type",
+                    "eq": "incident",
+                    "confidence_gte": "high_confidence"
+                  },
+                  {
+                    "question": "blast_radius",
+                    "gte": "wide_blast"
+                  }
+                ]
+              },
+              "action": {
+                "type": "page",
+                "target": "oncall",
+                "reason": "Incident, blast radius {{answers.blast_radius.score}}",
+                "gate": true
+              }
+            },
+            {
+              "id": "hold-for-design",
+              "description": "A wide blast radius or a design signal is held before implementation",
+              "when": {
+                "any": [
+                  {
+                    "question": "needs_design",
+                    "gte": "medium_confidence"
+                  },
+                  {
+                    "question": "blast_radius",
+                    "gte": "wide_blast"
+                  }
+                ]
+              },
+              "action": {
+                "type": "review",
+                "target": "design",
+                "reason": "Hold for design. Blast radius {{answers.blast_radius.score}}, needs_design {{answers.needs_design.noul}}",
+                "gate": true
+              }
+            },
+            {
+              "id": "ship-it",
+              "description": "A confident, narrow bugfix or feature can go to an implementer",
+              "when": {
+                "all": [
+                  {
+                    "question": "work_type",
+                    "in": [
+                      "bugfix",
+                      "feature"
+                    ],
+                    "confidence_gte": "medium_confidence"
+                  },
+                  {
+                    "question": "blast_radius",
+                    "lt": "wide_blast"
+                  },
+                  {
+                    "question": "needs_design",
+                    "lt": 0.4
+                  },
+                  {
+                    "question": "needs_human",
+                    "lt": 0.5
+                  }
+                ]
+              },
+              "action": {
+                "type": "route",
+                "target": "implementer",
+                "reason": "Ship as {{answers.work_type.choice}}. Blast radius {{answers.blast_radius.score}}",
+                "gate": false
+              }
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000,
+          "includeFullAnswers": true,
+          "failOnNoMatch": false
+        }
+      },
+      "id": "c1d0e6a0-0001-4000-8000-000000000013",
+      "name": "Intake policy",
+      "type": "n8n-nodes-decision-matrix.decisionMatrix",
+      "typeVersion": 1,
+      "position": [
+        1040,
+        620
+      ],
+      "credentials": {
+        "decisionServerApi": {
+          "name": "Decision Server API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "include": "all",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1d0e6a0-0001-4000-8000-000000000014",
+              "name": "title",
+              "value": "={{ $('Change context').item.json.title }}",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-000000000015",
+              "name": "state",
+              "value": "={{ $('Change context').item.json.state }}",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-000000000016",
+              "name": "design_state",
+              "value": "={{ $('Change context').item.json.design_state }}",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-000000000017",
+              "name": "monitor_state",
+              "value": "={{ $('Change context').item.json.monitor_state }}",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-000000000018",
+              "name": "reopen_state",
+              "value": "={{ $('Change context').item.json.reopen_state }}",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-000000000019",
+              "name": "reopen_monitor",
+              "value": "={{ $('Change context').item.json.reopen_monitor }}",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-00000000001a",
+              "name": "pass",
+              "value": "={{ $('Change context').item.json.pass }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c1d0e6a0-0001-4000-8000-00000000001b",
+      "name": "Keep the change",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1360,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c1d0e6a0-0001-4000-8000-00000000001c",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "page",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "page"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c1d0e6a0-0001-4000-8000-00000000001d",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "review",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "review"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c1d0e6a0-0001-4000-8000-00000000001e",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "route",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "route"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c1d0e6a0-0001-4000-8000-00000000001f",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "escalate",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "escalate"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "c1d0e6a0-0001-4000-8000-000000000020",
+      "name": "Fan out intake",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1680,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "include": "all",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1d0e6a0-0001-4000-8000-000000000021",
+              "name": "summary",
+              "value": "={{ $json.title }} paged: {{ $json.reason }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c1d0e6a0-0001-4000-8000-000000000022",
+      "name": "Page on-call",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2020,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "include": "all",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1d0e6a0-0001-4000-8000-000000000023",
+              "name": "state",
+              "value": "={{ $json.design_state }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c1d0e6a0-0001-4000-8000-000000000024",
+      "name": "Design context",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2020,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "include": "all",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1d0e6a0-0001-4000-8000-000000000025",
+              "name": "summary",
+              "value": "={{ $json.title }} needs a person: {{ $json.reason }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c1d0e6a0-0001-4000-8000-000000000026",
+      "name": "Ask a person",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2020,
+        820
+      ]
+    },
+    {
+      "parameters": {
+        "state": "={{ $json.state }}",
+        "questionSet": "custom",
+        "questions": {
+          "design_approved": {
+            "type": "noul",
+            "instructions": "The design is approved to implement"
+          },
+          "residual_risk": {
+            "type": "score",
+            "instructions": "Residual risk if this design is implemented",
+            "criteria": [
+              "No remaining risk",
+              "Limited, easy to reverse",
+              "Shared data or several services",
+              "Payments, security, or hard to reverse"
+            ]
+          },
+          "ready_to_implement": {
+            "type": "noul",
+            "instructions": "An implementer can start from this design"
+          }
+        },
+        "rules": {
+          "version": 1,
+          "default_action": {
+            "type": "escalate",
+            "target": "human",
+            "reason": "Design is not ready to build (approval {{answers.design_approved.noul}})"
+          },
+          "thresholds": {
+            "high_confidence": 0.85,
+            "medium_confidence": 0.7,
+            "wide_blast": 2
+          },
+          "rules": [
+            {
+              "id": "approved-to-build",
+              "description": "An approved design with limited residual risk can be implemented",
+              "when": {
+                "all": [
+                  {
+                    "question": "design_approved",
+                    "gte": "high_confidence"
+                  },
+                  {
+                    "question": "residual_risk",
+                    "lt": "wide_blast"
+                  },
+                  {
+                    "question": "ready_to_implement",
+                    "gte": "medium_confidence"
+                  }
+                ]
+              },
+              "action": {
+                "type": "route",
+                "target": "implementer",
+                "reason": "Design signed off. Residual risk {{answers.residual_risk.score}}",
+                "gate": false
+              }
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000,
+          "includeFullAnswers": true,
+          "failOnNoMatch": false
+        }
+      },
+      "id": "c1d0e6a0-0001-4000-8000-000000000027",
+      "name": "Design gate",
+      "type": "n8n-nodes-decision-matrix.decisionMatrix",
+      "typeVersion": 1,
+      "position": [
+        2340,
+        560
+      ],
+      "credentials": {
+        "decisionServerApi": {
+          "name": "Decision Server API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "include": "all",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1d0e6a0-0001-4000-8000-000000000028",
+              "name": "title",
+              "value": "={{ $('Design context').item.json.title }}",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-000000000029",
+              "name": "state",
+              "value": "={{ $('Design context').item.json.state }}",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-00000000002a",
+              "name": "design_state",
+              "value": "={{ $('Design context').item.json.design_state }}",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-00000000002b",
+              "name": "monitor_state",
+              "value": "={{ $('Design context').item.json.monitor_state }}",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-00000000002c",
+              "name": "reopen_state",
+              "value": "={{ $('Design context').item.json.reopen_state }}",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-00000000002d",
+              "name": "reopen_monitor",
+              "value": "={{ $('Design context').item.json.reopen_monitor }}",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-00000000002e",
+              "name": "pass",
+              "value": "={{ $('Design context').item.json.pass }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c1d0e6a0-0001-4000-8000-00000000002f",
+      "name": "Keep the design",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2660,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c1d0e6a0-0001-4000-8000-000000000030",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "route",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "route"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c1d0e6a0-0001-4000-8000-000000000031",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "escalate",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "escalate"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "c1d0e6a0-0001-4000-8000-000000000032",
+      "name": "Fan out design",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        2980,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "include": "all",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1d0e6a0-0001-4000-8000-000000000033",
+              "name": "summary",
+              "value": "={{ $json.title }} design needs a person: {{ $json.reason }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c1d0e6a0-0001-4000-8000-000000000034",
+      "name": "Design needs a person",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3320,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "include": "all",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1d0e6a0-0001-4000-8000-000000000035",
+              "name": "summary",
+              "value": "={{ $json.title }} released: {{ $json.reason }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c1d0e6a0-0001-4000-8000-000000000036",
+      "name": "Release record",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3320,
+        680
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": false,
+        "include": "all",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1d0e6a0-0001-4000-8000-000000000037",
+              "name": "title",
+              "value": "Error-budget poll",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-000000000038",
+              "name": "state",
+              "value": "Scheduled error-budget poll. Error rate flat. Service healthy.",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-000000000039",
+              "name": "monitor_state",
+              "value": "Scheduled error-budget poll. Error rate flat. Service healthy.",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-00000000003a",
+              "name": "design_state",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-00000000003b",
+              "name": "reopen_state",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-00000000003c",
+              "name": "reopen_monitor",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-00000000003d",
+              "name": "pass",
+              "value": 0,
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c1d0e6a0-0001-4000-8000-00000000003e",
+      "name": "Error-budget probe",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        520,
+        1180
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "include": "all",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1d0e6a0-0001-4000-8000-00000000003f",
+              "name": "title",
+              "value": "={{ $json.title !== undefined && $json.title !== null ? $json.title : ($json.body && $json.body.title !== undefined && $json.body.title !== null ? $json.body.title : \"Deploy alert\") }}",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-000000000040",
+              "name": "state",
+              "value": "={{ $json.state !== undefined && $json.state !== null ? $json.state : ($json.body && $json.body.state !== undefined && $json.body.state !== null ? $json.body.state : ($json.body && $json.body.message !== undefined && $json.body.message !== null ? $json.body.message : \"\")) }}",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-000000000041",
+              "name": "monitor_state",
+              "value": "={{ $json.monitor_state !== undefined && $json.monitor_state !== null ? $json.monitor_state : ($json.body && $json.body.state !== undefined && $json.body.state !== null ? $json.body.state : ($json.body && $json.body.message !== undefined && $json.body.message !== null ? $json.body.message : $json.state)) }}",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-000000000042",
+              "name": "design_state",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-000000000043",
+              "name": "reopen_state",
+              "value": "={{ $json.reopen_state !== undefined && $json.reopen_state !== null ? $json.reopen_state : ($json.body && $json.body.reopen_state !== undefined && $json.body.reopen_state !== null ? $json.body.reopen_state : \"\") }}",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-000000000044",
+              "name": "reopen_monitor",
+              "value": "={{ $json.reopen_monitor !== undefined && $json.reopen_monitor !== null ? $json.reopen_monitor : ($json.body && $json.body.reopen_monitor !== undefined && $json.body.reopen_monitor !== null ? $json.body.reopen_monitor : \"\") }}",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-000000000045",
+              "name": "pass",
+              "value": "={{ $json.pass !== undefined && $json.pass !== null ? $json.pass : ($json.body && $json.body.pass !== undefined && $json.body.pass !== null ? $json.body.pass : 0) }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c1d0e6a0-0001-4000-8000-000000000046",
+      "name": "Alert envelope",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        520,
+        1400
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "include": "all",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1d0e6a0-0001-4000-8000-000000000047",
+              "name": "state",
+              "value": "={{ $json.monitor_state ? $json.monitor_state : $json.state }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c1d0e6a0-0001-4000-8000-000000000048",
+      "name": "Monitor context",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3760,
+        820
+      ]
+    },
+    {
+      "parameters": {
+        "state": "={{ $json.state }}",
+        "questionSet": "custom",
+        "questions": {
+          "signal": {
+            "type": "choice",
+            "instructions": "What is production doing right now",
+            "criteria": {
+              "healthy": "Error rate and latency are inside the budget",
+              "degraded": "Worse than the budget, customers may be affected",
+              "outage": "Customers are blocked or a service is down"
+            }
+          },
+          "error_rate": {
+            "type": "score",
+            "instructions": "How far the error rate is from the budget",
+            "criteria": [
+              "Inside budget",
+              "Slightly over",
+              "Clearly over",
+              "Budget exhausted"
+            ]
+          },
+          "customer_impact": {
+            "type": "score",
+            "instructions": "How many customers feel this",
+            "criteria": [
+              "Nobody",
+              "One internal tool",
+              "A slice of customers",
+              "Most customers"
+            ]
+          },
+          "caused_by_release": {
+            "type": "noul",
+            "instructions": "This signal was caused by the release we just shipped"
+          },
+          "rollback_safe": {
+            "type": "noul",
+            "instructions": "Rolling back the release is safe"
+          }
+        },
+        "rules": {
+          "version": 1,
+          "default_action": {
+            "type": "escalate",
+            "target": "human",
+            "reason": "Monitoring signal is not clear enough to act on {{answers.signal.choice}} ({{answers.signal.confidence}})"
+          },
+          "thresholds": {
+            "high_confidence": 0.85,
+            "medium_confidence": 0.7,
+            "wide_blast": 2
+          },
+          "rules": [
+            {
+              "id": "rollback-and-reopen",
+              "description": "A release that hurt customers, and can be undone, is rolled back and reopened",
+              "when": {
+                "all": [
+                  {
+                    "question": "signal",
+                    "in": [
+                      "degraded",
+                      "outage"
+                    ],
+                    "confidence_gte": "high_confidence"
+                  },
+                  {
+                    "question": "caused_by_release",
+                    "gte": "medium_confidence"
+                  },
+                  {
+                    "question": "rollback_safe",
+                    "gte": "medium_confidence"
+                  },
+                  {
+                    "question": "customer_impact",
+                    "gte": "wide_blast"
+                  }
+                ]
+              },
+              "action": {
+                "type": "rollback",
+                "target": "release",
+                "reason": "Roll back the release and reopen the change. Error rate {{answers.error_rate.score}}, impact {{answers.customer_impact.score}}",
+                "gate": true
+              }
+            },
+            {
+              "id": "page-outage",
+              "description": "A confident outage pages on-call",
+              "when": {
+                "all": [
+                  {
+                    "question": "signal",
+                    "eq": "outage",
+                    "confidence_gte": "high_confidence"
+                  }
+                ]
+              },
+              "action": {
+                "type": "page",
+                "target": "oncall",
+                "reason": "Production is down. Error rate {{answers.error_rate.score}}",
+                "gate": true
+              }
+            },
+            {
+              "id": "close-healthy",
+              "description": "A healthy signal with no error-rate excursion closes the loop",
+              "when": {
+                "all": [
+                  {
+                    "question": "signal",
+                    "eq": "healthy",
+                    "confidence_gte": "medium_confidence"
+                  },
+                  {
+                    "question": "error_rate",
+                    "lt": 1
+                  }
+                ]
+              },
+              "action": {
+                "type": "close",
+                "target": "done",
+                "reason": "Release is healthy. Error rate {{answers.error_rate.score}}",
+                "gate": false
+              }
+            },
+            {
+              "id": "watch-narrow",
+              "description": "A confident degradation with a narrow impact is watched",
+              "when": {
+                "all": [
+                  {
+                    "question": "signal",
+                    "eq": "degraded",
+                    "confidence_gte": "medium_confidence"
+                  },
+                  {
+                    "question": "customer_impact",
+                    "lt": "wide_blast"
+                  }
+                ]
+              },
+              "action": {
+                "type": "review",
+                "target": "oncall",
+                "reason": "Degraded, and the impact is narrow. Watch it. Error rate {{answers.error_rate.score}}",
+                "gate": false
+              }
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000,
+          "includeFullAnswers": true,
+          "failOnNoMatch": false
+        }
+      },
+      "id": "c1d0e6a0-0001-4000-8000-000000000049",
+      "name": "Release gate",
+      "type": "n8n-nodes-decision-matrix.decisionMatrix",
+      "typeVersion": 1,
+      "position": [
+        4080,
+        820
+      ],
+      "credentials": {
+        "decisionServerApi": {
+          "name": "Decision Server API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "include": "all",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1d0e6a0-0001-4000-8000-00000000004a",
+              "name": "title",
+              "value": "={{ $('Monitor context').item.json.title }}",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-00000000004b",
+              "name": "state",
+              "value": "={{ $('Monitor context').item.json.state }}",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-00000000004c",
+              "name": "design_state",
+              "value": "={{ $('Monitor context').item.json.design_state }}",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-00000000004d",
+              "name": "monitor_state",
+              "value": "={{ $('Monitor context').item.json.monitor_state }}",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-00000000004e",
+              "name": "reopen_state",
+              "value": "={{ $('Monitor context').item.json.reopen_state }}",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-00000000004f",
+              "name": "reopen_monitor",
+              "value": "={{ $('Monitor context').item.json.reopen_monitor }}",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-000000000050",
+              "name": "pass",
+              "value": "={{ $('Monitor context').item.json.pass }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c1d0e6a0-0001-4000-8000-000000000051",
+      "name": "Keep the signal",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        4400,
+        820
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c1d0e6a0-0001-4000-8000-000000000052",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "rollback",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "rollback"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c1d0e6a0-0001-4000-8000-000000000053",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "page",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "page"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c1d0e6a0-0001-4000-8000-000000000054",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "close",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "close"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c1d0e6a0-0001-4000-8000-000000000055",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "review",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "review"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c1d0e6a0-0001-4000-8000-000000000056",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "escalate",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "escalate"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "c1d0e6a0-0001-4000-8000-000000000057",
+      "name": "Fan out the signal",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        4720,
+        820
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1d0e6a0-0001-4000-8000-000000000058",
+              "leftValue": "={{ $json.pass }}",
+              "rightValue": 1,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c1d0e6a0-0001-4000-8000-000000000059",
+      "name": "Still the first pass",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5060,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "include": "all",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1d0e6a0-0001-4000-8000-00000000005a",
+              "name": "title",
+              "value": "={{ $json.title }} (reopened)",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-00000000005b",
+              "name": "state",
+              "value": "={{ $json.reopen_state }}",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-00000000005c",
+              "name": "design_state",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-00000000005d",
+              "name": "monitor_state",
+              "value": "={{ $json.reopen_monitor }}",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-00000000005e",
+              "name": "reopen_state",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-00000000005f",
+              "name": "reopen_monitor",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-000000000060",
+              "name": "pass",
+              "value": "={{ $json.pass + 1 }}",
+              "type": "number"
+            },
+            {
+              "id": "c1d0e6a0-0001-4000-8000-000000000061",
+              "name": "summary",
+              "value": "={{ $json.title }} reopened: {{ $json.reopen_state }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c1d0e6a0-0001-4000-8000-000000000062",
+      "name": "Reopen the change",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        5400,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "include": "all",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1d0e6a0-0001-4000-8000-000000000063",
+              "name": "summary",
+              "value": "={{ $json.title }} stopped after pass {{ $json.pass }}: {{ $json.reason }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c1d0e6a0-0001-4000-8000-000000000064",
+      "name": "Loop stopped",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        5400,
+        680
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "include": "all",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1d0e6a0-0001-4000-8000-000000000065",
+              "name": "summary",
+              "value": "={{ $json.title }} paged from production: {{ $json.reason }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c1d0e6a0-0001-4000-8000-000000000066",
+      "name": "Page from production",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        5060,
+        860
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "include": "all",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1d0e6a0-0001-4000-8000-000000000067",
+              "name": "summary",
+              "value": "={{ $json.title }} closed: {{ $json.reason }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c1d0e6a0-0001-4000-8000-000000000068",
+      "name": "Close the release",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        5060,
+        1040
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "include": "all",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1d0e6a0-0001-4000-8000-000000000069",
+              "name": "summary",
+              "value": "={{ $json.title }} watching: {{ $json.reason }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c1d0e6a0-0001-4000-8000-00000000006a",
+      "name": "Watch the signal",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        5060,
+        1220
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "include": "all",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1d0e6a0-0001-4000-8000-00000000006b",
+              "name": "summary",
+              "value": "={{ $json.title }} signal needs a person: {{ $json.reason }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c1d0e6a0-0001-4000-8000-00000000006c",
+      "name": "Ask about the signal",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        5060,
+        1400
+      ]
+    }
+  ],
+  "pinData": {
+    "Walk the lifecycle": [
+      {
+        "json": {
+          "title": "Fix a typo in the README",
+          "state": "Fix a typo in the README install section. One word, no behavior change.",
+          "design_state": "",
+          "monitor_state": "Post-deploy check for the README typo release. Error rate flat. Service healthy.",
+          "reopen_state": "",
+          "reopen_monitor": "",
+          "pass": 0
+        }
+      },
+      {
+        "json": {
+          "title": "Fix a typo in the footer",
+          "state": "Fix a typo in the footer copy. One word, no behavior change.",
+          "design_state": "",
+          "monitor_state": "Post-deploy check for the footer release. Latency is a little worse for staff using that page.",
+          "reopen_state": "",
+          "reopen_monitor": "",
+          "pass": 0
+        }
+      },
+      {
+        "json": {
+          "title": "Migrate the payments schema",
+          "state": "Migrate the payments schema to a new ledger. This touches every charge and is hard to reverse.",
+          "design_state": "Design signed off for the payments migration. Residual risk accepted. Ready to implement.",
+          "monitor_state": "Alert: payments error rate spike after the migration release. Checkout latency climbed. Customers are failing.",
+          "reopen_state": "Checkout is down after the payments migration release. Orders fail. Rolled back, needs a fix.",
+          "reopen_monitor": "Post-rollback check for checkout. Service recovered. Error rate flat. Service healthy.",
+          "pass": 0
+        }
+      },
+      {
+        "json": {
+          "title": "Maybe a bug in the CSV export",
+          "state": "Maybe a bug in the CSV export. Not sure. A few users mentioned it, and there is no reproduction.",
+          "design_state": "",
+          "monitor_state": "",
+          "reopen_state": "",
+          "reopen_monitor": "",
+          "pass": 0
+        }
+      }
+    ],
+    "Change opened": [
+      {
+        "json": {
+          "title": "Fix a typo in the README",
+          "state": "Fix a typo in the README install section. One word, no behavior change.",
+          "design_state": "",
+          "monitor_state": "Post-deploy check for the README typo release. Error rate flat. Service healthy.",
+          "reopen_state": "",
+          "reopen_monitor": "",
+          "pass": 0
+        }
+      },
+      {
+        "json": {
+          "title": "Fix a typo in the footer",
+          "state": "Fix a typo in the footer copy. One word, no behavior change.",
+          "design_state": "",
+          "monitor_state": "Post-deploy check for the footer release. Latency is a little worse for staff using that page.",
+          "reopen_state": "",
+          "reopen_monitor": "",
+          "pass": 0
+        }
+      },
+      {
+        "json": {
+          "title": "Migrate the payments schema",
+          "state": "Migrate the payments schema to a new ledger. This touches every charge and is hard to reverse.",
+          "design_state": "Design signed off for the payments migration. Residual risk accepted. Ready to implement.",
+          "monitor_state": "Alert: payments error rate spike after the migration release. Checkout latency climbed. Customers are failing.",
+          "reopen_state": "Checkout is down after the payments migration release. Orders fail. Rolled back, needs a fix.",
+          "reopen_monitor": "Post-rollback check for checkout. Service recovered. Error rate flat. Service healthy.",
+          "pass": 0
+        }
+      },
+      {
+        "json": {
+          "title": "Maybe a bug in the CSV export",
+          "state": "Maybe a bug in the CSV export. Not sure. A few users mentioned it, and there is no reproduction.",
+          "design_state": "",
+          "monitor_state": "",
+          "reopen_state": "",
+          "reopen_monitor": "",
+          "pass": 0
+        }
+      }
+    ],
+    "Deploy alert": [
+      {
+        "json": {
+          "title": "Checkout alert",
+          "state": "Checkout is down for all customers. Every order fails.",
+          "monitor_state": "Checkout is down for all customers. Every order fails.",
+          "pass": 0
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Walk the lifecycle": {
+      "main": [
+        [
+          {
+            "node": "Normalize change",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Change opened": {
+      "main": [
+        [
+          {
+            "node": "Normalize change",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize change": {
+      "main": [
+        [
+          {
+            "node": "Change context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Change context": {
+      "main": [
+        [
+          {
+            "node": "Intake policy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Intake policy": {
+      "main": [
+        [
+          {
+            "node": "Keep the change",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keep the change": {
+      "main": [
+        [
+          {
+            "node": "Fan out intake",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fan out intake": {
+      "main": [
+        [
+          {
+            "node": "Page on-call",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Design context",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Release record",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ask a person",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Page on-call": {
+      "main": [
+        [
+          {
+            "node": "Monitor context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Design context": {
+      "main": [
+        [
+          {
+            "node": "Design gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Design gate": {
+      "main": [
+        [
+          {
+            "node": "Keep the design",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keep the design": {
+      "main": [
+        [
+          {
+            "node": "Fan out design",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fan out design": {
+      "main": [
+        [
+          {
+            "node": "Release record",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Design needs a person",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Release record": {
+      "main": [
+        [
+          {
+            "node": "Monitor context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error-budget poll": {
+      "main": [
+        [
+          {
+            "node": "Error-budget probe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error-budget probe": {
+      "main": [
+        [
+          {
+            "node": "Monitor context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deploy alert": {
+      "main": [
+        [
+          {
+            "node": "Alert envelope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert envelope": {
+      "main": [
+        [
+          {
+            "node": "Monitor context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monitor context": {
+      "main": [
+        [
+          {
+            "node": "Release gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Release gate": {
+      "main": [
+        [
+          {
+            "node": "Keep the signal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keep the signal": {
+      "main": [
+        [
+          {
+            "node": "Fan out the signal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fan out the signal": {
+      "main": [
+        [
+          {
+            "node": "Still the first pass",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Page from production",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Close the release",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Watch the signal",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ask about the signal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Still the first pass": {
+      "main": [
+        [
+          {
+            "node": "Reopen the change",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop stopped",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reopen the change": {
+      "main": [
+        [
+          {
+            "node": "Change context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

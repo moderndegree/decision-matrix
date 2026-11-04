@@ -1,0 +1,28 @@
+{
+  "intent": {
+    "type": "choice",
+    "instructions": "What this event is, based on the facts in the state",
+    "criteria": {
+      "legitimate_ops": "Expected work by someone who should be doing it",
+      "benign": "Ordinary request with no security impact",
+      "account_takeover": "Signs that someone else is using an account, session, or recovery flow",
+      "social_engineering": "A request to bypass, reset, or redirect a control or a payment",
+      "supply_chain": "A change to build, dependency, CI, or release controls",
+      "reconnaissance": "Probing for access, secrets, or weaknesses"
+    }
+  },
+  "risk": {
+    "type": "score",
+    "instructions": "How much an automated action could change security, access, or data",
+    "criteria": [
+      "No security impact and easy to reverse",
+      "Limited to one user or one record",
+      "Touches authentication, secrets, or a shared control",
+      "Bypasses a control, exposes data, or is hard to reverse"
+    ]
+  },
+  "needs_human": {
+    "type": "noul",
+    "instructions": "A person should decide before any automated action"
+  }
+}

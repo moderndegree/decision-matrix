@@ -1,0 +1,5 @@
+{
+  "intent": { "type": "choice", "choice": "legitimate_ops", "confidence": 0.92 },
+  "risk": { "type": "score", "score": 1, "confidence": 0.9 },
+  "needs_human": { "type": "noul", "noul": 0.15 }
+}
