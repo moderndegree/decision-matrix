@@ -1,0 +1,102 @@
+{
+  "version": 1,
+  "scripts": [
+    {
+      "question": "category",
+      "word": [
+        "invoice",
+        "refund",
+        "subscription",
+        "charge",
+        "charged",
+        "payment",
+        "billing",
+        "receipt"
+      ],
+      "choice": "billing",
+      "confidence": 0.96
+    },
+    {
+      "question": "category",
+      "word": [
+        "login",
+        "password",
+        "sign in",
+        "2fa",
+        "mfa",
+        "locked out"
+      ],
+      "choice": "account",
+      "confidence": 0.94
+    },
+    {
+      "question": "category",
+      "word": [
+        "bug",
+        "crash",
+        "outage",
+        "error",
+        "broken",
+        "exception"
+      ],
+      "choice": "technical",
+      "confidence": 0.9
+    },
+    {
+      "question": "category",
+      "else": true,
+      "choice": "other",
+      "confidence": 0.45
+    },
+    {
+      "question": "urgency",
+      "word": [
+        "outage",
+        "all users",
+        "safety issue"
+      ],
+      "score": 3,
+      "confidence": 0.94
+    },
+    {
+      "question": "urgency",
+      "word": [
+        "urgent",
+        "asap",
+        "today",
+        "right now"
+      ],
+      "score": 2,
+      "confidence": 0.9
+    },
+    {
+      "question": "urgency",
+      "word": [
+        "tomorrow",
+        "soon"
+      ],
+      "score": 1,
+      "confidence": 0.8
+    },
+    {
+      "question": "urgency",
+      "else": true,
+      "score": 0,
+      "confidence": 0.7
+    },
+    {
+      "question": "needs_human",
+      "word": [
+        "please review",
+        "call me",
+        "talk to a person"
+      ],
+      "noul": 0.93
+    },
+    {
+      "question": "needs_human",
+      "else": true,
+      "noul": 0.08
+    }
+  ]
+}

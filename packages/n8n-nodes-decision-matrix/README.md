@@ -1,10 +1,10 @@
 # n8n-nodes-decision-matrix
 
-An n8n community node that runs a declarative decision matrix against any server speaking the System One `/v1/systemone` protocol. That includes Lev, Jev, OpenJev, and other compatible implementations. The node does not hard-code a vendor.
+An n8n community node that runs a declarative decision matrix. Questions can be answered by a local script, or by any server speaking the System One `/v1/systemone` protocol. That includes Lev, Jev, OpenJev, and other compatible implementations. The node does not hard-code a vendor.
 
-You send a state and typed questions. The server returns a choice, a noul (yes-probability), or a score for each question, usually with probabilities. A first-match ruleset turns those answers, plus any **facts** the workflow verified itself, into one routing action: `action`, `target`, `reason`, `gate`, `matched_rule`, and `confidence`.
+You send a state and typed questions. Each answer is a choice, a noul (yes-probability), or a score. A first-match ruleset turns those answers, plus any **facts** the workflow verified itself, into one routing action: `action`, `target`, `reason`, `gate`, `matched_rule`, and `confidence`.
 
-For security decisions, read [Facts](#facts) first. A model reads text an attacker may have written, so the rules can require a verified fact before anything opens the gate.
+Security decisions are one use. For those, read [Facts](#facts) first. A model reads text an attacker may have written, so the rules can require a verified fact before anything opens the gate. A ticket queue or a commit tag usually does not need a model. See [Scripts](#scripts).
 
 ## Minimal working example
 
@@ -709,6 +709,26 @@ The command, not the node, belongs in CI. A second workflow runs `decision-matri
 
 The generic triage rules are the default already loaded on a new Decision Matrix node. Pair them with **Question Set → Generic Triage** and switch on `route` versus `escalate`. `target` for `route` is the chosen category (`billing`, `technical`, `account`, or `other`).
 
+## Scripts
+
+**Answer With → Scripts** runs a version 1 scripts document on the state and skips the server for every question it answers. Leave **Scripts** empty to use the built-in script for Generic Triage, SDLC Change, or Support / Ops. Those three answer every question, so the node does not need a Decision Server API credential. Paste a document when **Questions** replaces the preset.
+
+A step has one matcher and one answer. `word` is a whole word or phrase, ASCII case-insensitive. `tag` is a leading token followed by `:` or `(`, such as `feat:` or `feat(api):`. `contains` is a substring. `equals` compares one field exactly. `else` fills a question nothing earlier answered. The first match for a question wins. The matchers, the search text, and the answer shape are specified in [`PROTOCOL.md`](../decision-matrix-systemone/PROTOCOL.md#local-scripts).
+
+```json
+{
+  "version": 1,
+  "scripts": [
+    { "question": "category", "word": ["invoice", "refund"], "choice": "billing", "confidence": 0.96 },
+    { "question": "category", "else": true, "choice": "other", "confidence": 0.45 }
+  ]
+}
+```
+
+A script reads the state. It is not a fact. Use it for a queue, a severity, or a commit tag. For a security decision, keep the gate on facts. Attack triage, CI, and access review do not ship with scripts.
+
+When a script leaves a question open, the node sends only those questions. Script answers and server answers are merged, and the script wins on a question it answered.
+
 ## Local and hosted servers
 
 The node only requires `POST {baseUrl}/v1/systemone` with a JSON body of `state` and `questions`, and a JSON response that contains an `answers` map.
@@ -760,13 +780,13 @@ The n8n package is the host. The other workspace packages are the shareable part
 | Package | What it is |
 | --- | --- |
 | `decision-matrix-rules` | First-match rules engine. `evaluateRules(ruleset, answers, overrides)` returns `{ action, target, reason, gate, matched_rule, confidence }`. No I/O. |
-| `decision-matrix-systemone` | `POST /v1/systemone` client. Normalizes dialect differences and can perform the HTTP call via `callSystemOne`. |
+| `decision-matrix-systemone` | `POST /v1/systemone` client, plus local scripts (`validateScripts`, `runScripts`) that return the same answer view. |
 | `decision-matrix-cli` | `decision-matrix decide` reads one event, calls the server (or a saved answers file), and prints the decision. `decision-matrix test` runs policy test cases with no server. `decision-matrix check` lints a ruleset. `decision-matrix diff` explains what a ruleset change does to the policy. |
 | `decision-matrix-tui` | A terminal editor and test bench for a ruleset and its cases. Runs on Bun. |
 
 The protocol other languages can implement is [`decision-matrix-systemone/PROTOCOL.md`](../decision-matrix-systemone/PROTOCOL.md). JSON Schemas live next to it and next to the rules package. A host such as a Python guard keeps its own HTTP stack, framing, and scanners, and follows that document for the request, the normalized answer view, and the ruleset.
 
-There is no decision service in this repo. The decision server is already `POST /v1/systemone`. The ruleset is evaluated in the caller so a bad ruleset fails before that request. The command is one such caller. Its README is [`decision-matrix-cli/README.md`](../decision-matrix-cli/README.md).
+There is no decision service in this repo. The decision server is already `POST /v1/systemone`. A local script can answer the same questions when a model is the wrong tool. The ruleset is evaluated in the caller so a bad ruleset fails before that request. The command is one such caller. Its README is [`decision-matrix-cli/README.md`](../decision-matrix-cli/README.md).
 
 `ci-change` and `access-review` are fact-first presets for CI and routine audits. See [Facts](#facts). `attack-triage` is the command's default preset. It blocks a confident hostile intent, holds high risk or a human-review signal, and allows only a confident low-risk legitimate event. The default action also holds. Copy `packages/decision-matrix-cli/examples/attack-triage.questions.json` and `attack-triage.rules.json` when the team wants its own copy of that policy. After `pnpm build`, from the repository root:
 

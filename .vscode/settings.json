@@ -15,6 +15,10 @@
     {
       "fileMatch": ["*.facts.json", "**/facts.json"],
       "url": "./packages/decision-matrix-rules/schema/facts.schema.json"
+    },
+    {
+      "fileMatch": ["*.scripts.json"],
+      "url": "./packages/decision-matrix-systemone/schema/scripts.schema.json"
     }
   ]
 }

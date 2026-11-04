@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 
 import { RulesError, isPlainObject, lintRuleset, type LintFinding, type LintQuestion } from 'decision-matrix-rules';
-import { SystemOneError } from 'decision-matrix-systemone';
+import { SCRIPT_PRESETS, SystemOneError } from 'decision-matrix-systemone';
 
 import { formatCaseRun, readCases, runCases, uncovered } from './cases';
 import { decide, EXIT_ERROR, EXIT_GATE, EXIT_OK } from './decide';
@@ -30,9 +30,9 @@ Commands:
 
 decision-matrix decide — classify one event and print one action
 
-The event is the state. A decision server answers the questions. The ruleset
-picks one action. The process prints that decision as JSON. An automated
-step should proceed only when gate is false.
+The event is the state. A decision server or a local script answers the
+questions. The ruleset picks one action. The process prints that decision
+as JSON. An automated step should proceed only when gate is false.
 
 Usage:
   decision-matrix decide [options]
@@ -40,9 +40,15 @@ Usage:
 
 Options:
   --preset <name>       Built-in questions and rules. Default: attack-triage.
-                        Also: ci-change, access-review, generic, sdlc, support.
+                        Also: generic, sdlc, support, ci-change, access-review.
   --questions <file>    Questions JSON. Replaces the preset questions.
   --rules <file>        Ruleset JSON. Replaces the preset rules.
+  --scripts <file>      Scripts JSON. Answers questions locally, in the same
+                        shape as the server. A question it answers is not sent.
+                        When every question is answered, no server is called.
+  --local               Use the preset's built-in scripts. generic, sdlc, and
+                        support have them. attack-triage, ci-change, and
+                        access-review do not.
   --state <file>        Event JSON or text. Otherwise the event is read from stdin.
   --facts <file>        JSON object of values this caller verified. Fact
                         predicates in the rules read it. It is not sent to
@@ -65,6 +71,7 @@ Exit codes:
   2  decision printed and gate is true, because --fail-on-gate was set
 
 Examples:
+  decision-matrix decide --preset generic --local --state ticket.txt
   decision-matrix decide --server http://localhost:8000 --state event.json
   decision-matrix decide --answers answers.json --fail-on-gate
   decision-matrix decide --preset ci-change --facts facts.json --state pr.json --fail-on-gate
@@ -157,6 +164,8 @@ const CLI_OPTIONS = {
 	'fail-on-gate': { type: 'boolean' },
 	state: { type: 'string' },
 	facts: { type: 'string' },
+	scripts: { type: 'string' },
+	local: { type: 'boolean' },
 	cases: { type: 'string' },
 	'require-coverage': { type: 'boolean' },
 	strict: { type: 'boolean' },
@@ -173,7 +182,7 @@ type OptionName = keyof typeof CLI_OPTIONS;
 const COMMAND_OPTIONS: Record<string, ReadonlySet<OptionName>> = {
 	decide: new Set<OptionName>([
 		'questions', 'rules', 'preset', 'answers', 'server', 'api-key', 'model',
-		'timeout', 'threshold', 'fail-on-gate', 'state', 'facts', 'help',
+		'timeout', 'threshold', 'fail-on-gate', 'state', 'facts', 'scripts', 'local', 'help',
 	]),
 	test: new Set<OptionName>(['rules', 'preset', 'cases', 'threshold', 'require-coverage', 'json', 'help']),
 	check: new Set<OptionName>(['rules', 'preset', 'questions', 'threshold', 'strict', 'json', 'help']),
@@ -230,10 +239,12 @@ export async function run(io: CliIO): Promise<number> {
 		if (command === 'test') return await runTest(io, values);
 		if (command === 'check') return await runCheck(io, values);
 		if (command === 'diff') return await runDiff(io, values);
-		const preset = presetFor(typeof values.preset === 'string' ? values.preset : DEFAULT_PRESET);
+		const presetName = typeof values.preset === 'string' ? values.preset : DEFAULT_PRESET;
+		const preset = presetFor(presetName);
 		const questions = values.questions ? parseJson(await io.readFile(values.questions), values.questions) : preset.questions;
 		const rules = values.rules ? parseJson(await io.readFile(values.rules), values.rules) : preset.rules;
 		const answers = values.answers ? parseJson(await io.readFile(values.answers), values.answers) : undefined;
+		const scripts = await loadScripts(io, values, presetName);
 		const facts = values.facts ? readFacts(parseJson(await io.readFile(values.facts), values.facts), values.facts) : undefined;
 		const state = await loadState(io, values.state, answers !== undefined);
 		const serverUrl = nonempty(values.server) ?? nonempty(io.env.DECISION_SERVER_URL);
@@ -242,6 +253,7 @@ export async function run(io: CliIO): Promise<number> {
 			questions,
 			rules,
 			answers,
+			scripts,
 			thresholds: readThresholds(values.threshold),
 			facts,
 			failOnGate: values['fail-on-gate'] === true,
@@ -278,6 +290,21 @@ function presetFor(name: string) {
 		throw new Error(`Unknown preset "${name}". Known presets: ${Object.keys(POLICY_PRESETS).join(', ')}.`);
 	}
 	return preset;
+}
+
+async function loadScripts(io: CliIO, values: Values, presetName: string): Promise<unknown> {
+	if (values.local === true && values.scripts !== undefined) {
+		throw new Error('Pass --local or --scripts <file>, not both.');
+	}
+	if (values.answers !== undefined && (values.local === true || values.scripts !== undefined)) {
+		throw new Error('Pass --answers or scripts, not both. --local selects a preset script.');
+	}
+	if (typeof values.scripts === 'string') return parseJson(await io.readFile(values.scripts), values.scripts);
+	if (values.local !== true) return undefined;
+	if (presetName === 'generic' || presetName === 'sdlc' || presetName === 'support') return SCRIPT_PRESETS[presetName];
+	throw new Error(
+		`Preset "${presetName}" has no local scripts. A model or --answers has to answer it. Presets with scripts: generic, sdlc, support.`,
+	);
 }
 
 async function runTest(io: CliIO, values: Values): Promise<number> {

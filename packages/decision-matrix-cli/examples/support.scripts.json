@@ -1,0 +1,103 @@
+{
+  "version": 1,
+  "scripts": [
+    {
+      "question": "severity",
+      "word": [
+        "outage",
+        "service down",
+        "all customers",
+        "data loss"
+      ],
+      "choice": "sev1",
+      "confidence": 0.94
+    },
+    {
+      "question": "severity",
+      "word": [
+        "degraded",
+        "5xx",
+        "error rate",
+        "many customers"
+      ],
+      "choice": "sev2",
+      "confidence": 0.9
+    },
+    {
+      "question": "severity",
+      "word": [
+        "workaround",
+        "some users",
+        "minor"
+      ],
+      "choice": "sev3",
+      "confidence": 0.88
+    },
+    {
+      "question": "severity",
+      "word": [
+        "how do i",
+        "how to",
+        "cosmetic"
+      ],
+      "choice": "sev4",
+      "confidence": 0.9
+    },
+    {
+      "question": "severity",
+      "else": true,
+      "choice": "sev4",
+      "confidence": 0.4
+    },
+    {
+      "question": "customer_impact",
+      "word": [
+        "all customers",
+        "everyone",
+        "data loss"
+      ],
+      "score": 3,
+      "confidence": 0.93
+    },
+    {
+      "question": "customer_impact",
+      "word": [
+        "many customers",
+        "widespread"
+      ],
+      "score": 2,
+      "confidence": 0.88
+    },
+    {
+      "question": "customer_impact",
+      "word": [
+        "single user",
+        "one account"
+      ],
+      "score": 1,
+      "confidence": 0.85
+    },
+    {
+      "question": "customer_impact",
+      "else": true,
+      "score": 0,
+      "confidence": 0.7
+    },
+    {
+      "question": "page_oncall",
+      "word": [
+        "outage",
+        "service down",
+        "all customers",
+        "data loss",
+        "wake me"
+      ],
+      "noul": 0.95
+    },
+    {
+      "question": "page_oncall",
+      "else": true,
+      "noul": 0.05
+    }
+  ]
+}

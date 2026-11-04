@@ -1,6 +1,7 @@
 import {
 	NodeApiError,
 	NodeOperationError,
+	type ICredentialDataDecryptedObject,
 	type IDataObject,
 	type IExecuteFunctions,
 	type INodeExecutionData,
@@ -14,6 +15,7 @@ import {
 	readOptions,
 	readQuestions,
 	readRulesInput,
+	readScripts,
 	readState,
 	readThresholdOverrides,
 } from './parameters';
@@ -31,7 +33,10 @@ import {
 	formatConnectionError,
 	interpretHttpResponse,
 	normalizeBaseUrl,
+	runScripts,
 	systemOneUrl,
+	unansweredQuestions,
+	type SystemOneResult,
 } from 'decision-matrix-systemone';
 
 import { readThrownHttpError, unwrapN8nResponse } from './n8n-http';
@@ -39,9 +44,10 @@ import { readThrownHttpError, unwrapN8nResponse } from './n8n-http';
 const CREDENTIAL_TYPE = 'decisionServerApi';
 
 /**
- * Calls any System One / Jev-compatible server, then applies a declarative
- * ruleset to the typed answers. The rules engine is pure. This method is the
- * only I/O in the node; other hosts can call `callSystemOne` instead.
+ * Applies a declarative ruleset to typed answers. Answers come from a local
+ * script, from any System One / Jev-compatible server, or from both. The rules
+ * engine is pure. This method is the only I/O in the node; other hosts can
+ * call `runScripts` and `callSystemOne` instead.
  */
 export class DecisionMatrix implements INodeType {
 	description: INodeTypeDescription = {
@@ -52,7 +58,7 @@ export class DecisionMatrix implements INodeType {
 		version: 1,
 		subtitle: '={{$parameter["questionSet"]}}',
 		description:
-			'Run a multidimensional decision matrix against any System One / Jev-compatible server and apply declarative rules.',
+			'Run a decision matrix. A local script or any System One / Jev-compatible server answers the questions, then declarative rules pick one action.',
 		defaults: {
 			name: 'Decision Matrix',
 		},
@@ -62,7 +68,7 @@ export class DecisionMatrix implements INodeType {
 		credentials: [
 			{
 				name: CREDENTIAL_TYPE,
-				required: true,
+				required: false,
 			},
 		],
 		properties: [
@@ -157,6 +163,35 @@ export class DecisionMatrix implements INodeType {
 					'Optional JSON object of values this workflow verified itself, for example from your identity provider, HR system, or git. Rules test them with fact predicates such as {"fact": "grant.privileged", "eq": true}. Facts are not sent to the decision server. Build them from systems you trust, never from the request body. When facts alone decide, the server is not called.',
 			},
 			{
+				displayName: 'Answer With',
+				name: 'answerWith',
+				type: 'options',
+				default: 'server',
+				description:
+					'Server asks POST /v1/systemone and needs the Decision Server API credential. Scripts answer locally with the same answer shape. The server is called only for questions the script leaves open. Generic Triage, SDLC Change, and Support / Ops have built-in scripts.',
+				options: [
+					{
+						name: 'Server',
+						value: 'server',
+						description: 'Ask the decision server. A credential is required.',
+					},
+					{
+						name: 'Scripts',
+						value: 'scripts',
+						description: 'Answer with local scripts. Leave Scripts empty to use the built-in one.',
+					},
+				],
+			},
+			{
+				displayName: 'Scripts',
+				name: 'scripts',
+				type: 'json',
+				default: '{}',
+				displayOptions: { show: { answerWith: ['scripts'] } },
+				description:
+					'Optional scripts document. Empty uses the built-in script for Generic Triage, SDLC Change, or Support / Ops. Paste a document when Questions replaces the preset. A question a step answers is not sent to the server.',
+			},
+			{
 				displayName: 'Thresholds',
 				name: 'thresholds',
 				type: 'fixedCollection',
@@ -208,7 +243,7 @@ export class DecisionMatrix implements INodeType {
 						name: 'includeFullAnswers',
 						type: 'boolean',
 						default: true,
-						description: 'Whether to copy the server answers map onto the output item. On by default.',
+						description: 'Whether to copy the answers map onto the output item. On by default.',
 					},
 					{
 						displayName: 'Fail on No Matching Rule',
@@ -243,21 +278,20 @@ export class DecisionMatrix implements INodeType {
 		const items = this.getInputData();
 		const output: INodeExecutionData[] = [];
 
-		// One credential for the whole run. authenticate() on that credential
-		// adds the bearer token only when an API key is present and normalizes
-		// the base URL. Every request goes through httpRequestWithAuthentication.
-		let baseUrl: string;
-		try {
-			const credentials = await this.getCredentials(CREDENTIAL_TYPE);
-			baseUrl = normalizeBaseUrl(credentials.baseUrl);
-		} catch (error) {
-			throw asNodeError(this, error);
-		}
+		// The credential is loaded on the first item that still needs a server.
+		// authenticate() adds the bearer token only when an API key is present.
+		// A script that answers every question, or facts that already decided,
+		// does not need a credential.
+		let baseUrl: string | undefined;
+		const loadBaseUrl = async (): Promise<string> => {
+			if (baseUrl === undefined) baseUrl = await serverBaseUrl(this);
+			return baseUrl;
+		};
 
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
 			try {
 				output.push({
-					json: await evaluateItem(this, itemIndex, baseUrl),
+					json: await evaluateItem(this, itemIndex, loadBaseUrl),
 					pairedItem: { item: itemIndex },
 				});
 			} catch (error) {
@@ -278,31 +312,39 @@ export class DecisionMatrix implements INodeType {
 
 /**
  * Per-item pipeline:
- * 1. Read state, questions, rules, facts, thresholds, and options (expressions already resolved).
+ * 1. Read state, questions, rules, facts, scripts, thresholds, and options (expressions already resolved).
  * 2. Validate the ruleset and the facts before any network call so a typo does not spend a request.
  * 3. If leading facts-only rules decide, return that decision without calling the server.
- * 4. POST {baseUrl}/v1/systemone with { state, questions, model? }. Facts are not sent.
- * 5. Normalize the answers, then let the pure engine pick the first matching rule.
- * 6. Shape the routing item. Fail closed only when Fail on no matching rule is on.
+ * 4. Run scripts. A question they answer is not sent.
+ * 5. POST {baseUrl}/v1/systemone with the questions still open. Facts and scripts are not sent.
+ * 6. Normalize the answers, then let the pure engine pick the first matching rule.
+ * 7. Shape the routing item. Fail closed only when Fail on no matching rule is on.
  */
 async function evaluateItem(
 	ctx: IExecuteFunctions,
 	itemIndex: number,
-	baseUrl: string,
+	loadBaseUrl: () => Promise<string>,
 ): Promise<IDataObject> {
 	const state = readState(ctx.getNodeParameter('state', itemIndex));
 	const questionSet = ctx.getNodeParameter('questionSet', itemIndex, 'generic');
+	const questionsParam = ctx.getNodeParameter('questions', itemIndex, {});
 	// Non-empty Questions replaces the preset. Empty keeps the preset.
-	const questions = readQuestions(questionSet, ctx.getNodeParameter('questions', itemIndex, {}));
+	const questions = readQuestions(questionSet, questionsParam);
 	const rules = readRulesInput(ctx.getNodeParameter('rules', itemIndex));
 	const thresholdOverrides = readThresholdOverrides(ctx.getNodeParameter('thresholds', itemIndex, {}));
 	const facts = readFactsInput(ctx.getNodeParameter('facts', itemIndex, '{}'));
 	const options = readOptions(ctx.getNodeParameter('options', itemIndex, {}));
 
 	// Fail here, before the HTTP call, when the rules JSON is structurally wrong,
-	// a threshold name would not resolve, or a referenced fact is missing.
+	// a threshold name would not resolve, a script is wrong, or a referenced fact is missing.
 	assertThresholdsResolve(rules, thresholdOverrides);
 	assertFactsResolve(rules, facts);
+	const program = readScripts(
+		ctx.getNodeParameter('answerWith', itemIndex, 'server'),
+		questionSet,
+		ctx.getNodeParameter('scripts', itemIndex, {}),
+		questionsParam,
+	);
 
 	const fromFacts = decideFromFacts(rules, facts, thresholdOverrides);
 	if (fromFacts) {
@@ -312,20 +354,43 @@ async function evaluateItem(
 		}) as IDataObject;
 	}
 
-	const body = buildSystemOneBody(state, questions, options.model);
-	const response = await callDecisionServer(ctx, baseUrl, body, options.timeout);
-	const http = unwrapN8nResponse(response);
-	const systemOne = interpretHttpResponse(http.statusCode, http.body, baseUrl);
-	const evaluation = evaluateRules(rules, systemOne.answers, thresholdOverrides, facts);
+	const scriptAnswers = program ? runScripts(program, state) : {};
+	const remaining = unansweredQuestions(questions, scriptAnswers);
+	let systemOne: SystemOneResult = { answers: {}, rawAnswers: {} };
+	let rawBody: unknown;
+	if (Object.keys(remaining).length > 0) {
+		const baseUrl = await loadBaseUrl();
+		const body = buildSystemOneBody(state, remaining, options.model);
+		const response = await callDecisionServer(ctx, baseUrl, body, options.timeout);
+		const http = unwrapN8nResponse(response);
+		rawBody = http.body;
+		systemOne = interpretHttpResponse(http.statusCode, http.body, baseUrl);
+	}
+	const answers = { ...systemOne.answers, ...scriptAnswers };
+	const rawAnswers: Record<string, unknown> = { ...systemOne.rawAnswers, ...scriptAnswers };
+	systemOne = { ...systemOne, answers, rawAnswers };
+	const evaluation = evaluateRules(rules, answers, thresholdOverrides, facts);
 
 	if (options.failOnNoMatch && evaluation.matched_rule === null) {
 		throw new RulesError(noMatchMessage(evaluation));
 	}
 
-	return buildItemOutput(evaluation, systemOne, http.body, {
+	return buildItemOutput(evaluation, systemOne, rawBody, {
 		includeFullAnswers: options.includeFullAnswers,
-		includeRawResponse: options.includeRawResponse,
+		includeRawResponse: options.includeRawResponse && rawBody !== undefined,
 	}) as IDataObject;
+}
+
+async function serverBaseUrl(ctx: IExecuteFunctions): Promise<string> {
+	let credentials: ICredentialDataDecryptedObject;
+	try {
+		credentials = await ctx.getCredentials(CREDENTIAL_TYPE);
+	} catch {
+		throw new SystemOneError(
+			'A Decision Server API credential is required when a question is sent to the server. Set the credential, or choose Answer With → Scripts.',
+		);
+	}
+	return normalizeBaseUrl(credentials.baseUrl);
 }
 
 async function callDecisionServer(

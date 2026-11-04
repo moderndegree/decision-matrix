@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "decision-matrix-systemone/schema/scripts.schema.json",
+  "title": "Decision matrix scripts",
+  "description": "Version 1 local programs that answer System One questions. A step returns the same choice, noul, or score a server would. The document is not sent to the server. Steps run in order and the first match for a question wins.",
+  "$comment": "validateScripts accepts exactly the documents this schema accepts, and also checks what JSON Schema cannot: else is the last step for its question, a path nests at most 32 segments, and path segments named __proto__, prototype, or constructor are rejected. Passed a question set, it also checks that the question exists, the answer type matches, a choice is one of its labels, and a score is one of its levels.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "scripts"],
+  "properties": {
+    "$schema": {
+      "description": "Optional. Lets an editor find this schema. Ignored by the runner.",
+      "type": "string"
+    },
+    "version": { "const": 1 },
+    "scripts": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/step" }
+    }
+  },
+  "$defs": {
+    "needles": {
+      "description": "One phrase, or a list of phrases. Any one of them can match. ASCII case is ignored.",
+      "oneOf": [
+        { "type": "string", "minLength": 1, "pattern": "\\S" },
+        {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "pattern": "\\S" }
+        }
+      ]
+    },
+    "path": {
+      "description": "A dotted path of names or array indexes, such as title or commit.type or items.0.subject.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^(?:[A-Za-z_][A-Za-z0-9_-]*|0|[1-9][0-9]*)(?:\\.(?:[A-Za-z_][A-Za-z0-9_-]*|0|[1-9][0-9]*))*$"
+    },
+    "paths": {
+      "description": "Search these fields instead of the whole state. Any one of them can match.",
+      "oneOf": [
+        { "$ref": "#/$defs/path" },
+        {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/path" }
+        }
+      ]
+    },
+    "equals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "value"],
+      "properties": {
+        "path": { "$ref": "#/$defs/path" },
+        "value": {
+          "description": "Compared with ===. A string is case-sensitive. A missing field does not match.",
+          "type": ["string", "number", "boolean", "null"]
+        }
+      }
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["question"],
+      "properties": {
+        "question": {
+          "description": "Question id this step answers. The same id may have several steps.",
+          "type": "string",
+          "pattern": "^\\S+$"
+        },
+        "description": { "type": "string" },
+        "path": { "$ref": "#/$defs/paths" },
+        "contains": {
+          "description": "Substring of the searched text.",
+          "$ref": "#/$defs/needles"
+        },
+        "word": {
+          "description": "The phrase appears with a non-letter, non-digit boundary on each side. Underscore counts as a letter.",
+          "$ref": "#/$defs/needles"
+        },
+        "tag": {
+          "description": "The searched text starts with the token and the next character is : or (. feat matches feat: and feat(api):, and does not match feature: or feat add.",
+          "$ref": "#/$defs/needles"
+        },
+        "equals": { "$ref": "#/$defs/equals" },
+        "else": {
+          "description": "Matches when no earlier step answered this question. It has to be the last step for that question.",
+          "const": true
+        },
+        "choice": { "type": "string", "minLength": 1, "pattern": "\\S" },
+        "noul": { "type": "number", "minimum": 0, "maximum": 1 },
+        "score": { "type": "integer", "minimum": 0 },
+        "confidence": {
+          "description": "Required with choice and score. Omitted on a noul.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "allOf": [
+        {
+          "oneOf": [
+            { "required": ["contains"], "not": { "anyOf": [{ "required": ["word"] }, { "required": ["tag"] }, { "required": ["equals"] }, { "required": ["else"] }] } },
+            { "required": ["word"], "not": { "anyOf": [{ "required": ["contains"] }, { "required": ["tag"] }, { "required": ["equals"] }, { "required": ["else"] }] } },
+            { "required": ["tag"], "not": { "anyOf": [{ "required": ["contains"] }, { "required": ["word"] }, { "required": ["equals"] }, { "required": ["else"] }] } },
+            { "required": ["equals"], "not": { "anyOf": [{ "required": ["contains"] }, { "required": ["word"] }, { "required": ["tag"] }, { "required": ["else"] }] } },
+            { "required": ["else"], "not": { "anyOf": [{ "required": ["contains"] }, { "required": ["word"] }, { "required": ["tag"] }, { "required": ["equals"] }] } }
+          ]
+        },
+        {
+          "oneOf": [
+            { "required": ["choice", "confidence"], "not": { "anyOf": [{ "required": ["noul"] }, { "required": ["score"] }] } },
+            { "required": ["score", "confidence"], "not": { "anyOf": [{ "required": ["choice"] }, { "required": ["noul"] }] } },
+            { "required": ["noul"], "not": { "anyOf": [{ "required": ["choice"] }, { "required": ["score"] }, { "required": ["confidence"] }] } }
+          ]
+        },
+        {
+          "if": { "anyOf": [{ "required": ["else"] }, { "required": ["equals"] }] },
+          "then": { "not": { "required": ["path"] } }
+        }
+      ]
+    }
+  }
+}

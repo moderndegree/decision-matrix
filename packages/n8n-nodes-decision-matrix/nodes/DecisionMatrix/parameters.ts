@@ -1,11 +1,16 @@
 import { RulesError, isPlainObject } from 'decision-matrix-rules';
 import {
 	GENERIC_TRIAGE_QUESTIONS,
+	GENERIC_TRIAGE_SCRIPTS,
 	readState,
 	SDLC_QUESTIONS,
+	SDLC_SCRIPTS,
 	SUPPORT_OPS_QUESTIONS,
+	SUPPORT_OPS_SCRIPTS,
 	SystemOneError,
 	validateQuestions,
+	validateScripts,
+	type ScriptProgram,
 	type SystemOneQuestion,
 } from 'decision-matrix-systemone';
 
@@ -37,6 +42,46 @@ export function readQuestions(questionSet: unknown, custom: unknown): Record<str
 	if (selected === 'support') return cloneQuestions(SUPPORT_OPS_QUESTIONS);
 	throw new SystemOneError(
 		`Question set "${String(selected)}" is unknown. Choose Generic Triage, SDLC Change, Support / Ops, or Custom JSON.`,
+	);
+}
+
+/**
+ * Server sends every question. Scripts answer locally, and the server is
+ * asked only for questions the script leaves open. An empty Scripts value
+ * uses the built-in script for Generic Triage, SDLC Change, or Support / Ops.
+ */
+export function readScripts(
+	answerWith: unknown,
+	questionSet: unknown,
+	scriptsParam: unknown,
+	questionsParam: unknown,
+): ScriptProgram | undefined {
+	if (readAnswerWith(answerWith) === 'server') return undefined;
+	const parsed = parseJsonParameter(scriptsParam, 'Scripts');
+	const empty = parsed === undefined || (isPlainObject(parsed) && Object.keys(parsed).length === 0);
+	const document = empty ? builtinScripts(questionSet, questionsParam) : parsed;
+	return validateScripts(document, readQuestions(questionSet, questionsParam));
+}
+
+export function readAnswerWith(value: unknown): 'server' | 'scripts' {
+	if (value === undefined || value === null || value === '' || value === 'server') return 'server';
+	if (value === 'scripts') return 'scripts';
+	throw new SystemOneError(`Answer With "${String(value)}" is unknown. Choose Server or Scripts.`);
+}
+
+function builtinScripts(questionSet: unknown, questionsParam: unknown): unknown {
+	if (readQuestionOverride(questionsParam)) {
+		throw new SystemOneError(
+			'Scripts are empty, and Questions replaces the preset. Paste a scripts document, or clear Questions to use the built-in script.',
+		);
+	}
+	const selected = questionSet === undefined || questionSet === null || questionSet === '' ? 'generic' : questionSet;
+	const name = selected === 'custom' ? 'generic' : selected;
+	if (name === 'generic') return GENERIC_TRIAGE_SCRIPTS;
+	if (name === 'sdlc') return SDLC_SCRIPTS;
+	if (name === 'support') return SUPPORT_OPS_SCRIPTS;
+	throw new SystemOneError(
+		`Question set "${String(selected)}" has no built-in script. Choose Generic Triage, SDLC Change, or Support / Ops, or paste a scripts document.`,
 	);
 }
 

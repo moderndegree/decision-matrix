@@ -6,7 +6,7 @@ Three commands:
 - `test` runs policy test cases against a ruleset, without a server.
 - `check` lints a ruleset without running it.
 
-`decide` is a local command for one event. It asks a System One server the questions, then applies a version-1 ruleset on this machine. It prints one decision. It does not open a service, and it does not scan traffic.
+`decide` is a local command for one event. A System One server or a local script answers the questions, then a version-1 ruleset on this machine picks the action. It prints one decision. It does not open a service, and it does not scan traffic.
 
 The decision server answers the questions. The ruleset chooses the action. Scanners, secret redaction, and authentication checks stay in the program that builds the event. Pass what that program verified with `--facts`. Rules read facts directly, and they are not sent to the server.
 
@@ -27,7 +27,9 @@ During development, `tsx` runs the source without a build:
 pnpm exec tsx src/cli.ts decide --help
 ```
 
-The default preset is `attack-triage`. `--questions` and `--rules` replace either half of it. Other presets: `ci-change`, `access-review`, `generic`, `sdlc`, `support`.
+The default preset is `attack-triage`. `--questions` and `--rules` replace either half of it. Other presets: `generic`, `sdlc`, `support`, `ci-change`, `access-review`.
+
+`--local` uses the preset's scripts and does not need a server. `generic`, `sdlc`, and `support` have scripts. `--scripts <file>` uses a scripts document instead. A question the script answers is not sent. When every question is answered, the server is not called. `--answers` and scripts cannot be combined.
 
 `--facts facts.json` passes a JSON object of verified values to the rules. Every fact a rule references must be present, or the command exits 1 before calling the server. When the leading rules reference only facts and one matches, the command prints that decision without calling the server (no `--server` and no state needed), and `answers` is `{}`.
 
@@ -38,6 +40,14 @@ decision-matrix decide \
   --answers examples/attack-triage.block.answers.json \
   --fail-on-gate
 ```
+
+With the built-in generic script, no server:
+
+```bash
+decision-matrix decide --preset generic --local --state examples/ticket.txt
+```
+
+`examples/ticket.txt` is one charge. The generic script routes it to billing. `examples/generic.scripts.json`, `sdlc.scripts.json`, and `support.scripts.json` are the built-in scripts.
 
 Against a decision server:
 
@@ -209,11 +219,11 @@ decision-matrix check --rules policy.json --questions questions.json --strict
 | `unknown-question` | error | A rule reads a question the question set does not ask. |
 | `operator-type` | error | The operator does not fit the question's type, for example `eq` on a noul. |
 | `unknown-label` | error | A choice label the question does not offer. Labels are case-sensitive, so the rule never matches. |
-| `model-opens-gate` | warning | A rule with gate false needs no fact, so model answers alone open it. |
+| `model-opens-gate` | warning | A rule with gate false needs no fact, so answers alone open it. |
 | `default-opens-gate` | warning | No match proceeds. |
 | `shadowed` | warning | An earlier rule matches whenever this one would, so this one never wins. |
 | `out-of-range` | warning | A comparison outside a score's levels or a probability's 0–1. |
-| `fact-rule-after-model-rule` | info | A facts-only rule comes after a rule that asks the model, so it cannot skip the server. |
+| `fact-rule-after-model-rule` | info | A facts-only rule comes after a rule that reads answers, so it cannot decide first. |
 | `unused-question` | info | Asked on every call, read by no rule. |
 | `unused-threshold` | info | Defined, used by no rule. |
 

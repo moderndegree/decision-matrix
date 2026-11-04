@@ -2,7 +2,7 @@
 
 First-match rules engine for normalized System One answers. No I/O and no HTTP client.
 
-The wire format and confidence rules are in `decision-matrix-systemone`'s `PROTOCOL.md`. The ruleset schema is `schema/ruleset.schema.json`, and `$defs.answerView` in it is the answer shape this package evaluates. Facts follow `schema/facts.schema.json`. `validateRuleset` and `validateFacts` accept exactly what those schemas accept, and the tests check both against the same corpus.
+The wire format, the confidence rules, and the local scripts that produce the same answer view are in `decision-matrix-systemone`'s `PROTOCOL.md`. The ruleset schema is `schema/ruleset.schema.json`, and `$defs.answerView` in it is the answer shape this package evaluates. Facts follow `schema/facts.schema.json`. `validateRuleset` and `validateFacts` accept exactly what those schemas accept, and the tests check both against the same corpus.
 
 ```ts
 import { assertFactsResolve, assertThresholdsResolve, decideFromFacts, evaluateRules } from 'decision-matrix-rules';

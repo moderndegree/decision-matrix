@@ -3,7 +3,7 @@
   "nodeVersion": "1.0",
   "codexVersion": "1.0",
   "categories": ["Miscellaneous", "Development"],
-  "alias": ["System One", "Jev", "Decision", "Rules", "Triage"],
+  "alias": ["System One", "Jev", "Decision", "Rules", "Triage", "Routing", "Script"],
   "resources": {
     "primaryDocumentation": [
       {
