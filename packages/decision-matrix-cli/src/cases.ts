@@ -1,6 +1,7 @@
 import {
 	RulesError,
 	decideFromFacts,
+	validateFacts,
 	evaluateRules,
 	isPlainObject,
 	traceRules,
@@ -63,7 +64,9 @@ export interface CaseRun {
 	covered: Set<string | null>;
 }
 
-const FILE_KEYS = new Set(['version', 'defaults', 'cases']);
+const FILE_KEYS = new Set(['$schema', 'version', 'defaults', 'cases']);
+const THRESHOLD_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const RESERVED = new Set(['__proto__', 'prototype', 'constructor']);
 const DEFAULT_KEYS = new Set(['facts', 'answers', 'thresholds']);
 const CASE_KEYS = new Set(['name', 'facts', 'answers', 'thresholds', 'expect']);
 const EXPECT_KEYS = new Set(['matched_rule', 'action', 'target', 'reason', 'gate', 'from_facts', 'error']);
@@ -75,12 +78,14 @@ export function readCases(input: unknown, source = 'cases'): PolicyCase[] {
 	for (const key of Object.keys(input)) {
 		if (!FILE_KEYS.has(key)) throw new Error(`${source} has unknown key "${key}". Expected: ${[...FILE_KEYS].join(', ')}.`);
 	}
+	if (input.$schema !== undefined && typeof input.$schema !== 'string') throw new Error(`${source} $schema must be a string.`);
 	const defaults = input.defaults ?? {};
 	if (!isPlainObject(defaults)) throw new Error(`${source} defaults must be an object.`);
 	for (const key of Object.keys(defaults)) {
 		if (!DEFAULT_KEYS.has(key)) throw new Error(`${source} defaults has unknown key "${key}". Expected: ${[...DEFAULT_KEYS].join(', ')}.`);
 		if (!isPlainObject(defaults[key])) throw new Error(`${source} defaults.${key} must be an object.`);
 	}
+	checkParts(defaults, `${source} defaults`);
 	const names = new Set<string>();
 	return input.cases.map((entry, index) => {
 		const path = `${source} cases[${index}]`;
@@ -94,6 +99,7 @@ export function readCases(input: unknown, source = 'cases'): PolicyCase[] {
 		for (const key of ['facts', 'answers', 'thresholds'] as const) {
 			if (entry[key] !== undefined && !isPlainObject(entry[key])) throw new Error(`${path}.${key} must be an object.`);
 		}
+		checkParts(entry, path);
 		const expect = entry.expect;
 		if (!isPlainObject(expect) || Object.keys(expect).length === 0) {
 			throw new Error(`${path}.expect must name at least one of: ${[...EXPECT_KEYS].join(', ')}.`);
@@ -101,6 +107,7 @@ export function readCases(input: unknown, source = 'cases'): PolicyCase[] {
 		for (const key of Object.keys(expect)) {
 			if (!EXPECT_KEYS.has(key)) throw new Error(`${path}.expect has unknown key "${key}". Expected: ${[...EXPECT_KEYS].join(', ')}.`);
 		}
+		checkExpect(expect, `${path}.expect`);
 		const facts = mergeFacts(defaults.facts, entry.facts);
 		const answers = defaults.answers || entry.answers ? { ...(defaults.answers as object), ...(entry.answers as object) } : undefined;
 		const thresholds =
@@ -113,6 +120,39 @@ export function readCases(input: unknown, source = 'cases'): PolicyCase[] {
 			expect: expect as CaseExpectation,
 		};
 	});
+}
+
+/** Facts, thresholds, and answer shapes, as cases.schema.json describes them. */
+function checkParts(part: Record<string, unknown>, path: string): void {
+	if (part.facts !== undefined) {
+		try {
+			validateFacts(part.facts);
+		} catch (error) {
+			throw new Error(`${path}.facts: ${(error as Error).message}`);
+		}
+	}
+	if (isPlainObject(part.thresholds)) {
+		for (const [name, value] of Object.entries(part.thresholds)) {
+			if (!THRESHOLD_NAME.test(name) || RESERVED.has(name)) throw new Error(`${path}.thresholds has an invalid name "${name}".`);
+			if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`${path}.thresholds.${name} must be a number.`);
+		}
+	}
+	if (isPlainObject(part.answers)) {
+		for (const [id, answer] of Object.entries(part.answers)) {
+			if (/\s/.test(id) || id === '') throw new Error(`${path}.answers has an invalid question id "${id}".`);
+			if (!isPlainObject(answer) || Object.keys(answer).length === 0) throw new Error(`${path}.answers.${id} must be an answer object.`);
+		}
+	}
+}
+
+function checkExpect(expect: Record<string, unknown>, path: string): void {
+	const types: Record<string, string> = { action: 'string', target: 'string', reason: 'string', error: 'string', gate: 'boolean', from_facts: 'boolean' };
+	for (const [key, type] of Object.entries(types)) {
+		if (expect[key] !== undefined && typeof expect[key] !== type) throw new Error(`${path}.${key} must be a ${type}. Received ${JSON.stringify(expect[key])}.`);
+	}
+	if (expect.matched_rule !== undefined && expect.matched_rule !== null && typeof expect.matched_rule !== 'string') {
+		throw new Error(`${path}.matched_rule must be a rule id, or null for the default action.`);
+	}
 }
 
 function mergeFacts(base: unknown, override: unknown): Record<string, unknown> | undefined {
@@ -131,17 +171,7 @@ export function runCases(rules: unknown, cases: PolicyCase[], thresholds?: Recor
 	const results = cases.map((testCase) => {
 		const overrides = { ...(thresholds ?? {}), ...(testCase.thresholds ?? {}) };
 		const answers = testCase.answers ?? {};
-		let decision: EvaluationResult | undefined;
-		let fromFacts = false;
-		let error: string | undefined;
-		try {
-			const early = decideFromFacts(rules, testCase.facts, overrides);
-			fromFacts = early !== null;
-			decision = early ?? evaluateRules(rules, answers, overrides, testCase.facts);
-		} catch (caught) {
-			if (!(caught instanceof RulesError)) throw caught;
-			error = caught.message;
-		}
+		const { decision, fromFacts, error } = decideCase(rules, testCase, thresholds);
 		if (decision) covered.add(decision.matched_rule);
 
 		const failures = compare(testCase.expect, decision, fromFacts, error);
@@ -163,6 +193,24 @@ export function runCases(rules: unknown, cases: PolicyCase[], thresholds?: Recor
 		return result;
 	});
 	return { results, rules: ruleset.rules.map((rule) => rule.id), covered };
+}
+
+export interface CaseDecision {
+	decision?: EvaluationResult;
+	fromFacts: boolean;
+	error?: string;
+}
+
+/** The decision a ruleset makes for one case, the way decide would make it. */
+export function decideCase(rules: unknown, testCase: PolicyCase, thresholds?: Record<string, number>): CaseDecision {
+	const overrides = { ...(thresholds ?? {}), ...(testCase.thresholds ?? {}) };
+	try {
+		const early = decideFromFacts(rules, testCase.facts, overrides);
+		return { decision: early ?? evaluateRules(rules, testCase.answers ?? {}, overrides, testCase.facts), fromFacts: early !== null };
+	} catch (caught) {
+		if (!(caught instanceof RulesError)) throw caught;
+		return { fromFacts: false, error: caught.message };
+	}
 }
 
 function compare(

@@ -1,0 +1,53 @@
+{
+  "name": "n8n-nodes-decision-matrix",
+  "version": "0.1.0",
+  "description": "n8n community node that runs a declarative decision matrix against any System One / Jev-compatible server",
+  "license": "MIT",
+  "keywords": [
+    "n8n-community-node-package",
+    "n8n",
+    "n8n-nodes",
+    "decision-matrix",
+    "systemone",
+    "jev"
+  ],
+  "author": {
+    "name": "n8n-nodes-decision-matrix"
+  },
+  "main": "dist/nodes/DecisionMatrix/DecisionMatrix.node.js",
+  "scripts": {
+    "build": "node scripts/clean-dist.js && node scripts/bundle-node.js && node scripts/copy-assets.js",
+    "test": "tsx --test test/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepublishOnly": "pnpm run build"
+  },
+  "files": [
+    "dist"
+  ],
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "strict": true,
+    "credentials": [
+      "dist/credentials/DecisionServerApi.credentials.js"
+    ],
+    "nodes": [
+      "dist/nodes/DecisionMatrix/DecisionMatrix.node.js"
+    ]
+  },
+  "peerDependencies": {
+    "n8n-workflow": "*"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "ajv": "catalog:",
+    "decision-matrix-rules": "workspace:^",
+    "decision-matrix-systemone": "workspace:^",
+    "esbuild": "catalog:",
+    "n8n-workflow": "catalog:",
+    "tsx": "catalog:",
+    "typescript": "catalog:"
+  },
+  "engines": {
+    "node": ">=20.19"
+  }
+}

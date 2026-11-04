@@ -1,0 +1,28 @@
+packages:
+  - packages/*
+
+# Supply-chain settings. This repository builds a security gate, so its own
+# dependencies get the same scrutiny.
+#
+# A version must be a week old before pnpm installs it. Most malicious
+# releases are found and pulled within hours. (pnpm 11 defaults to one day.)
+minimumReleaseAge: 10080
+
+# Dependency install scripts are blocked unless listed here. Review a
+# package's script before you set it to true.
+allowBuilds:
+  esbuild: false
+  # Native addon from n8n-workflow, used here for types only. n8n supplies
+  # n8n-workflow at runtime and the bundle leaves it out.
+  isolated-vm: false
+  # Bun's postinstall copies the platform binary out of @oven/bun-<platform>.
+  # Allowed for this exact version only, so an upgrade needs a fresh review.
+  bun@1.4.4: true
+
+catalog:
+  ajv: ^8.20.0
+  "@types/node": ^24.10.1
+  esbuild: ^0.25.11
+  n8n-workflow: ^2.6.0
+  tsx: ^4.20.6
+  typescript: ^5.9.3

@@ -11,7 +11,7 @@ DEST=/home/node/.n8n/nodes/node_modules/n8n-nodes-decision-matrix
 NODE_JS="$SRC/dist/nodes/DecisionMatrix/DecisionMatrix.node.js"
 
 if [ ! -f "$NODE_JS" ]; then
-  echo "Decision Matrix dist is missing. From the repo, run npm run build, then start this stack again." >&2
+  echo "Decision Matrix dist is missing. From the repo root, run pnpm build, then start this stack again." >&2
   exit 1
 fi
 

@@ -11,6 +11,7 @@ export {
 	referencedThresholds,
 	renderTemplate,
 	traceRules,
+	validateFacts,
 	validateRuleset,
 	type EvaluationTrace,
 	type FactMap,
@@ -19,6 +20,7 @@ export {
 	type TraceCheck,
 	type TraceNode,
 } from './engine';
+export { diffRulesets, type ChangeEffect, type PolicyChange } from './diff';
 export { lintRuleset, type LintFinding, type LintOptions, type LintQuestion, type LintSeverity } from './lint';
 export {
 	ACCESS_REVIEW_RULES,

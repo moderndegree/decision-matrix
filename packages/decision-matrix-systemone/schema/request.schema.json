@@ -5,35 +5,20 @@
   "description": "POST {baseUrl}/v1/systemone. model is omitted when the caller does not set one. See PROTOCOL.md for the response and the aliases a client should accept.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["state", "questions"],
+  "required": [
+    "state",
+    "questions"
+  ],
   "properties": {
     "state": {
       "description": "Text, a JSON object, or a JSON array. The server reads this as the thing to classify."
     },
     "questions": {
-      "type": "object",
-      "minProperties": 1,
-      "additionalProperties": { "$ref": "#/$defs/question" },
-      "propertyNames": { "type": "string", "minLength": 1, "pattern": "^\\S+$" }
+      "$ref": "questions.schema.json"
     },
-    "model": { "type": "string", "minLength": 1 }
-  },
-  "$defs": {
-    "question": {
-      "type": "object",
-      "additionalProperties": true,
-      "required": ["type", "instructions"],
-      "properties": {
-        "type": { "enum": ["choice", "noul", "score"] },
-        "instructions": { "type": "string", "minLength": 1 },
-        "criteria": {
-          "description": "Choice: map of option id to description, or a list of labels. Score: levels from lowest to highest. Noul omits criteria.",
-          "oneOf": [
-            { "type": "object", "additionalProperties": { "type": ["string", "null"] } },
-            { "type": "array", "items": { "type": "string" }, "minItems": 2 }
-          ]
-        }
-      }
+    "model": {
+      "type": "string",
+      "minLength": 1
     }
   }
 }

@@ -2,7 +2,7 @@
 
 Client for `POST /v1/systemone`. It builds the request, normalizes dialect differences, and can perform the HTTP call. It does not choose an action. Pair it with `decision-matrix-rules`.
 
-The protocol, including the aliases this package accepts, is [PROTOCOL.md](PROTOCOL.md). JSON Schemas are in `schema/`.
+The protocol, including the aliases this package accepts, is [PROTOCOL.md](PROTOCOL.md). JSON Schemas are in `schema/`: `questions.schema.json` for a questions file (and a request's `questions`), `request.schema.json`, and `response.schema.json`. `validateQuestions` accepts exactly what `questions.schema.json` accepts: a choice has labels, a score has at least two levels, a noul has no criteria, and every question has instructions. `$schema` is allowed in a questions file and is not sent to the server.
 
 ```ts
 import { callSystemOne } from 'decision-matrix-systemone';

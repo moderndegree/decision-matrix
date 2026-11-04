@@ -58,7 +58,9 @@ export type ThresholdMap = Record<string, number>;
 /** Host-verified values keyed by name. Nested objects are reached with dotted paths. */
 export type FactMap = Record<string, unknown>;
 
-const RULESET_KEYS = new Set(['version', 'default_action', 'thresholds', 'rules', 'open_gate_requires_facts']);
+const RULESET_KEYS = new Set(['$schema', 'version', 'default_action', 'thresholds', 'rules', 'open_gate_requires_facts']);
+/** The numeric strings an operand may use. The same pattern is in ruleset.schema.json. */
+const NUMERIC_STRING = /^[-+]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][-+]?[0-9]+)?$/;
 const RULE_KEYS = new Set(['id', 'description', 'when', 'action']);
 const ACTION_KEYS = new Set(['type', 'target', 'reason', 'gate']);
 
@@ -70,6 +72,9 @@ export function validateRuleset(input: unknown): Ruleset {
 	}
 	assertKnownKeys(input, RULESET_KEYS, 'rules');
 
+	if (input.$schema !== undefined && typeof input.$schema !== 'string') {
+		throw new RulesError('rules.$schema must be a string. It is read by editors and ignored by the engine.');
+	}
 	if (input.version !== 1) {
 		throw new RulesError(
 			`rules.version must be the number 1. Received ${JSON.stringify(input.version)}.`,
@@ -264,9 +269,38 @@ function referencedFactPaths(condition: Condition): string[][] {
 
 function readFactMap(facts: FactMap | undefined): FactMap {
 	if (facts === undefined) return {};
+	return validateFacts(facts);
+}
+
+/**
+ * Checks facts against schema/facts.schema.json: nested objects whose keys
+ * are fact path segments, and whose values are strings, numbers, booleans,
+ * null, or lists of those. That is every shape a fact predicate can read.
+ */
+export function validateFacts(facts: unknown): FactMap {
 	if (!isPlainObject(facts)) {
 		throw new RulesError(`Facts must be a JSON object keyed by fact name. Received ${describeValue(facts)}.`);
 	}
+	const walk = (node: Record<string, unknown>, path: string, depth: number): void => {
+		if (depth > MAX_DEPTH) throw new RulesError(`Facts nest more than ${MAX_DEPTH} levels deep at ${path}.`);
+		for (const [key, value] of Object.entries(node)) {
+			const at = path ? `${path}.${key}` : key;
+			if (!FACT_SEGMENT.test(key) || RESERVED_NAMES.has(key)) {
+				throw new RulesError(`Fact name "${at}" is not usable in a fact path. Use letters, digits, underscores, and hyphens, starting with a letter or underscore.`);
+			}
+			if (isFactValue(value)) continue;
+			if (Array.isArray(value)) {
+				if (!value.every(isFactValue)) throw new RulesError(`Fact "${at}" is a list, so it may hold only strings, numbers, booleans, and null.`);
+				continue;
+			}
+			if (isPlainObject(value)) {
+				walk(value, at, depth + 1);
+				continue;
+			}
+			throw new RulesError(`Fact "${at}" is ${describeValue(value)}. Facts are strings, numbers, booleans, null, lists of those, or objects of facts.`);
+		}
+	};
+	walk(facts, '', 0);
 	return facts;
 }
 
@@ -987,7 +1021,7 @@ function readNumericOperand(value: unknown, path: string): ThresholdRef {
 		const template = THRESHOLD_TEMPLATE.exec(value.trim());
 		if (template) return { kind: 'threshold', name: template[1] };
 		if (IDENTIFIER.test(value) && !RESERVED_NAMES.has(value)) return { kind: 'threshold', name: value };
-		if (value.trim() !== '' && Number.isFinite(Number(value))) {
+		if (NUMERIC_STRING.test(value) && Number.isFinite(Number(value))) {
 			return { kind: 'number', value: Number(value) };
 		}
 		throw new RulesError(`${path} must be a number or a threshold name. Received ${JSON.stringify(value)}.`);

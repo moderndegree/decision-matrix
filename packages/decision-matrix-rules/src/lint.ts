@@ -210,10 +210,20 @@ type Atom =
 
 const MAX_BRANCHES = 64;
 
-function implies(b: Condition, a: Condition, thresholds: Record<string, number>): boolean {
+/**
+ * True when every input that satisfies `b` also satisfies `a`. Each side
+ * resolves threshold names against its own map, so two versions of a ruleset
+ * can be compared. Sound, not complete: false can mean "not proven".
+ */
+export function implies(
+	b: Condition,
+	a: Condition,
+	thresholds: Record<string, number>,
+	thresholdsA: Record<string, number> = thresholds,
+): boolean {
 	const guaranteed = guaranteedAtoms(b, thresholds);
 	if (guaranteed.length === 0) return false;
-	const branches = branchesOf(a, thresholds);
+	const branches = branchesOf(a, thresholdsA);
 	if (branches === null) return false;
 	return branches.some((branch) => branch.every((needed) => guaranteed.some((have) => atomImplies(have, needed))));
 }

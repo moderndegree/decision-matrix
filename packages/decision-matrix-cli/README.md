@@ -12,16 +12,19 @@ The decision server answers the questions. The ruleset chooses the action. Scann
 
 ## Run
 
-From this repository, after `npm install` and `npm run build`:
+From the repository root, after `pnpm install` and `pnpm build`:
 
 ```bash
-npx decision-matrix decide --help
+cd packages/decision-matrix-cli
+node dist/cli.js --help
 ```
+
+The examples below run from this package's directory and call the built command as `decision-matrix`. In this repository that is `node dist/cli.js`. Once the package is published, `npx decision-matrix` works anywhere.
 
 During development, `tsx` runs the source without a build:
 
 ```bash
-npx tsx packages/decision-matrix-cli/src/cli.ts decide --help
+pnpm exec tsx src/cli.ts decide --help
 ```
 
 The default preset is `attack-triage`. `--questions` and `--rules` replace either half of it. Other presets: `ci-change`, `access-review`, `generic`, `sdlc`, `support`.
@@ -31,8 +34,8 @@ The default preset is `attack-triage`. `--questions` and `--rules` replace eithe
 Offline, with a saved answer file (a System One response or a bare answers map):
 
 ```bash
-npx decision-matrix decide \
-  --answers packages/decision-matrix-cli/examples/attack-triage.block.answers.json \
+decision-matrix decide \
+  --answers examples/attack-triage.block.answers.json \
   --fail-on-gate
 ```
 
@@ -40,8 +43,8 @@ Against a decision server:
 
 ```bash
 export DECISION_SERVER_URL=http://localhost:8000
-npx decision-matrix decide \
-  --state packages/decision-matrix-cli/examples/event.json
+decision-matrix decide \
+  --state examples/event.json
 ```
 
 `--api-key` or `DECISION_SERVER_API_KEY` sends `Authorization: Bearer` when set. `--model` or `DECISION_SERVER_MODEL` is sent only when set. `--threshold high_confidence=0.9` replaces that threshold for one run. Repeat the flag for another name.
@@ -69,7 +72,7 @@ Stdout is the decision JSON, including the answers:
 A shell step that must stop on a hold uses `--fail-on-gate`. A triage step reads the JSON and leaves the exit code at 0.
 
 ```bash
-npx decision-matrix decide --answers review.json --fail-on-gate || echo held
+decision-matrix decide --answers review.json --fail-on-gate || echo held
 ```
 
 The ruleset is checked before the server is called. `--answers` skips the server even if `--server` is also set.
@@ -147,8 +150,8 @@ Try the collector locally against two commits:
 
 ```bash
 GITHUB_EVENT_PATH=event.json BASE_SHA=<base> HEAD_SHA=<head> OUT_DIR=out \
-  node packages/decision-matrix-cli/examples/github/collect-facts.mjs
-npx decision-matrix decide --preset ci-change --facts out/facts.json --state out/state.json --fail-on-gate
+  node examples/github/collect-facts.mjs
+decision-matrix decide --preset ci-change --facts out/facts.json --state out/state.json --fail-on-gate
 ```
 
 ## Policy tests
@@ -172,12 +175,12 @@ A cases file says what the policy must decide. Each case gives facts and saved a
 }
 ```
 
-Facts merge over the defaults, including nested objects. Answers replace default answers by question id, and thresholds replace default thresholds by name. Answers accept the same dialects as `--answers`.
+The format is [`schema/cases.schema.json`](schema/cases.schema.json), and `readCases` accepts exactly what it accepts. Facts merge over the defaults, including nested objects. Answers replace default answers by question id, and thresholds replace default thresholds by name. Answers accept the same dialects as `--answers`.
 
 `expect` takes any of `matched_rule` (null means the default action), `action`, `target`, `reason`, `gate`, `from_facts` (true when the leading facts-only rules must decide without the server), and `error` (a substring of the error the case must raise, for example a missing fact).
 
 ```bash
-npx decision-matrix test --preset ci-change --cases examples/ci-change.cases.json --require-coverage
+decision-matrix test --preset ci-change --cases examples/ci-change.cases.json --require-coverage
 ```
 
 A failing case prints each rule up to the one that won, with the value it saw and the check that failed:
@@ -196,7 +199,7 @@ A failing case prints each rule up to the one that won, with the value it saw an
 ## Check
 
 ```bash
-npx decision-matrix check --rules policy.json --questions questions.json --strict
+decision-matrix check --rules policy.json --questions questions.json --strict
 ```
 
 | Code | Severity | Meaning |
@@ -215,6 +218,23 @@ npx decision-matrix check --rules policy.json --questions questions.json --stric
 | `unused-threshold` | info | Defined, used by no rule. |
 
 The question checks run when `--questions` is given, or with `--preset`. The `shadowed` check is conservative. It can miss a dead rule, but it does not call a live rule dead.
+
+## Diff
+
+```bash
+decision-matrix diff --from main.rules.json --to edited.rules.json --cases examples/ci-change.cases.json
+```
+
+`diff` reports what a ruleset change does, not which lines moved. Each change is one of:
+
+- **Loosens:** a rule holds less often or opens the gate more often, a hold rule was removed, a gate flipped to false, or a gate-opening rule moved ahead of a hold.
+- **Tightens:** the reverse.
+- **Needs review:** a condition changed and neither direction could be proven.
+- **Other:** renames, reasons, targets, and moves that do not change which side wins.
+
+Threshold changes are judged through every rule that uses them. Raising `injection` from 0.5 to 0.9 is reported as "`hold-injection` matches fewer events after a threshold change, so it holds less often". The rule language has no negation, so that direction is exact.
+
+With `--cases`, the diff also lists each case whose decision changes, and marks a case that held before and now opens the gate. `--format markdown` writes a PR comment. `--fail-on-loosen` exits 2 when anything loosens, needs review, or a case newly opens the gate. `policy-tests.yml` posts the diff to the job summary of every policy PR.
 
 ## Access review
 
