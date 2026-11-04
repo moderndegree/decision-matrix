@@ -1,0 +1,320 @@
+{
+  "version": 1,
+  "scripts": [
+    {
+      "question": "change_type",
+      "equals": {
+        "path": "commit.type",
+        "value": "feat"
+      },
+      "choice": "feature",
+      "confidence": 1
+    },
+    {
+      "question": "change_type",
+      "equals": {
+        "path": "commit.type",
+        "value": "feature"
+      },
+      "choice": "feature",
+      "confidence": 1
+    },
+    {
+      "question": "change_type",
+      "equals": {
+        "path": "commit.type",
+        "value": "fix"
+      },
+      "choice": "bugfix",
+      "confidence": 1
+    },
+    {
+      "question": "change_type",
+      "equals": {
+        "path": "commit.type",
+        "value": "bugfix"
+      },
+      "choice": "bugfix",
+      "confidence": 1
+    },
+    {
+      "question": "change_type",
+      "equals": {
+        "path": "commit.type",
+        "value": "refactor"
+      },
+      "choice": "refactor",
+      "confidence": 1
+    },
+    {
+      "question": "change_type",
+      "equals": {
+        "path": "commit.type",
+        "value": "docs"
+      },
+      "choice": "docs",
+      "confidence": 1
+    },
+    {
+      "question": "change_type",
+      "equals": {
+        "path": "commit.type",
+        "value": "chore"
+      },
+      "choice": "chore",
+      "confidence": 1
+    },
+    {
+      "question": "change_type",
+      "tag": [
+        "feat",
+        "feature"
+      ],
+      "choice": "feature",
+      "confidence": 0.99
+    },
+    {
+      "question": "change_type",
+      "path": [
+        "title",
+        "subject",
+        "message"
+      ],
+      "tag": [
+        "feat",
+        "feature"
+      ],
+      "choice": "feature",
+      "confidence": 0.99
+    },
+    {
+      "question": "change_type",
+      "tag": [
+        "fix",
+        "bugfix",
+        "bug"
+      ],
+      "choice": "bugfix",
+      "confidence": 0.99
+    },
+    {
+      "question": "change_type",
+      "path": [
+        "title",
+        "subject",
+        "message"
+      ],
+      "tag": [
+        "fix",
+        "bugfix",
+        "bug"
+      ],
+      "choice": "bugfix",
+      "confidence": 0.99
+    },
+    {
+      "question": "change_type",
+      "tag": "refactor",
+      "choice": "refactor",
+      "confidence": 0.99
+    },
+    {
+      "question": "change_type",
+      "path": [
+        "title",
+        "subject",
+        "message"
+      ],
+      "tag": "refactor",
+      "choice": "refactor",
+      "confidence": 0.99
+    },
+    {
+      "question": "change_type",
+      "tag": [
+        "docs",
+        "doc"
+      ],
+      "choice": "docs",
+      "confidence": 0.99
+    },
+    {
+      "question": "change_type",
+      "path": [
+        "title",
+        "subject",
+        "message"
+      ],
+      "tag": [
+        "docs",
+        "doc"
+      ],
+      "choice": "docs",
+      "confidence": 0.99
+    },
+    {
+      "question": "change_type",
+      "tag": [
+        "chore",
+        "build",
+        "ci"
+      ],
+      "choice": "chore",
+      "confidence": 0.99
+    },
+    {
+      "question": "change_type",
+      "path": [
+        "title",
+        "subject",
+        "message"
+      ],
+      "tag": [
+        "chore",
+        "build",
+        "ci"
+      ],
+      "choice": "chore",
+      "confidence": 0.99
+    },
+    {
+      "question": "change_type",
+      "word": [
+        "readme",
+        "documentation"
+      ],
+      "choice": "docs",
+      "confidence": 0.86
+    },
+    {
+      "question": "change_type",
+      "word": [
+        "typo",
+        "bug"
+      ],
+      "choice": "bugfix",
+      "confidence": 0.8
+    },
+    {
+      "question": "change_type",
+      "word": "refactor",
+      "choice": "refactor",
+      "confidence": 0.86
+    },
+    {
+      "question": "change_type",
+      "else": true,
+      "choice": "chore",
+      "confidence": 0.4
+    },
+    {
+      "question": "risk",
+      "word": [
+        "migrate",
+        "migration",
+        "breaking",
+        "security",
+        "authentication",
+        "payment",
+        "credential"
+      ],
+      "score": 3,
+      "confidence": 0.9
+    },
+    {
+      "question": "risk",
+      "word": [
+        "api",
+        "schema",
+        "database"
+      ],
+      "score": 2,
+      "confidence": 0.85
+    },
+    {
+      "question": "risk",
+      "else": true,
+      "score": 0,
+      "confidence": 0.75
+    },
+    {
+      "question": "needs_design",
+      "word": [
+        "migrate",
+        "migration",
+        "breaking",
+        "redesign",
+        "architecture"
+      ],
+      "noul": 0.92
+    },
+    {
+      "question": "needs_design",
+      "else": true,
+      "noul": 0.08
+    },
+    {
+      "question": "ready_to_implement",
+      "word": [
+        "not sure",
+        "tbd",
+        "unclear",
+        "to be determined"
+      ],
+      "noul": 0.15
+    },
+    {
+      "question": "ready_to_implement",
+      "tag": [
+        "feat",
+        "feature",
+        "fix",
+        "bugfix",
+        "bug",
+        "refactor",
+        "docs",
+        "doc",
+        "chore",
+        "build",
+        "ci"
+      ],
+      "noul": 0.9
+    },
+    {
+      "question": "ready_to_implement",
+      "path": [
+        "title",
+        "subject",
+        "message"
+      ],
+      "tag": [
+        "feat",
+        "feature",
+        "fix",
+        "bugfix",
+        "bug",
+        "refactor",
+        "docs",
+        "doc",
+        "chore",
+        "build",
+        "ci"
+      ],
+      "noul": 0.9
+    },
+    {
+      "question": "ready_to_implement",
+      "word": [
+        "acceptance criteria",
+        "steps to reproduce",
+        "repro"
+      ],
+      "noul": 0.92
+    },
+    {
+      "question": "ready_to_implement",
+      "else": true,
+      "noul": 0.55
+    }
+  ]
+}

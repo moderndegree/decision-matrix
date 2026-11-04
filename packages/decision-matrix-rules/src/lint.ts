@@ -58,7 +58,7 @@ export function lintRuleset(input: unknown, options: LintOptions = {}): LintFind
 		add(
 			'warning',
 			'default-opens-gate',
-			'default_action has gate false, so an event that no rule recognizes proceeds. A security policy should hold by default.',
+			'default_action has gate false, so an event that no rule recognizes proceeds. Hold by default when a miss should not proceed.',
 		);
 	}
 
@@ -69,7 +69,7 @@ export function lintRuleset(input: unknown, options: LintOptions = {}): LintFind
 			add(
 				'warning',
 				'model-opens-gate',
-				`Rule "${rule.id}" opens the gate on model answers alone. A model reads text an attacker may have written. Require a fact under "all", or set open_gate_requires_facts to enforce this.`,
+				`Rule "${rule.id}" opens the gate on answers alone. Those answers are judgments about text, not facts the host verified. Require a fact under "all", or set open_gate_requires_facts when a verified fact must agree.`,
 				rule.id,
 			);
 		}
@@ -79,7 +79,7 @@ export function lintRuleset(input: unknown, options: LintOptions = {}): LintFind
 			add(
 				'info',
 				'fact-rule-after-model-rule',
-				`Rule "${rule.id}" reads only facts but comes after "${firstModelRule}", which asks the model. Move it above that rule to decide without a server call.`,
+				`Rule "${rule.id}" reads only facts but comes after "${firstModelRule}", which reads answers. Move it above that rule to decide before any script or server call.`,
 				rule.id,
 			);
 		}

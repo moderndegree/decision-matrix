@@ -3,8 +3,8 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 
-import { ATTACK_TRIAGE_RULES, referencedQuestions, validateRuleset } from 'decision-matrix-rules';
-import { ATTACK_TRIAGE_QUESTIONS } from 'decision-matrix-systemone';
+import { ATTACK_TRIAGE_RULES, GENERIC_TRIAGE_RULES, referencedQuestions, validateRuleset } from 'decision-matrix-rules';
+import { ATTACK_TRIAGE_QUESTIONS, GENERIC_TRIAGE_QUESTIONS, SCRIPT_PRESETS } from 'decision-matrix-systemone';
 
 import { decide, EXIT_ERROR, EXIT_GATE, EXIT_OK, run } from '../src';
 import { captured, examples, packageRoot as root, readExample } from './fixtures';
@@ -98,6 +98,50 @@ describe('decide', () => {
 		assert.equal(result.record.matched_rule, 'hold-hostile');
 		assert.equal(result.record.gate, true);
 	});
+
+	it('answers with scripts and does not call the server', async () => {
+		let calls = 0;
+		const fetchImpl: typeof fetch = async () => {
+			calls += 1;
+			throw new Error('server should not be called');
+		};
+		const result = await decide({
+			state: 'I was charged twice on my invoice',
+			questions: GENERIC_TRIAGE_QUESTIONS,
+			rules: GENERIC_TRIAGE_RULES,
+			scripts: SCRIPT_PRESETS.generic,
+			server: { baseUrl: 'http://127.0.0.1:9', fetch: fetchImpl },
+		});
+		assert.equal(calls, 0);
+		assert.equal(result.record.action, 'route');
+		assert.equal(result.record.target, 'billing');
+	});
+
+	it('sends only the questions a script left open', async () => {
+		let body: unknown;
+		const fetchImpl: typeof fetch = async (_input, init) => {
+			body = JSON.parse(String(init?.body));
+			return new Response(JSON.stringify({ answers: { needs_human: { type: 'noul', noul: 0.1 } } }), { status: 200 });
+		};
+		const result = await decide({
+			state: 'invoice for march',
+			questions: GENERIC_TRIAGE_QUESTIONS,
+			rules: GENERIC_TRIAGE_RULES,
+			scripts: {
+				version: 1,
+				scripts: [
+					{ question: 'category', word: 'invoice', choice: 'billing', confidence: 0.95 },
+					{ question: 'urgency', else: true, score: 0, confidence: 0.8 },
+				],
+			},
+			server: { baseUrl: 'http://decisions.example', fetch: fetchImpl },
+		});
+		const sent = body as { questions: Record<string, unknown> };
+		assert.deepEqual(Object.keys(sent.questions), ['needs_human']);
+		assert.equal(result.record.answers.category?.choice, 'billing');
+		assert.equal(result.record.answers.urgency?.score, 0);
+		assert.equal(result.record.action, 'route');
+	});
 });
 
 describe('decision-matrix decide', () => {
@@ -157,6 +201,29 @@ describe('decision-matrix decide', () => {
 		);
 		assert.equal(await run(io), EXIT_OK);
 		assert.equal(JSON.parse(stdout.join('')).matched_rule, 'allow-legitimate');
+	});
+
+	it('runs the generic preset locally', async () => {
+		for (const name of ['generic', 'sdlc', 'support'] as const) {
+			assert.deepEqual(JSON.parse(readExample(`${name}.scripts.json`)), SCRIPT_PRESETS[name]);
+		}
+		const { io, stdout, stderr } = captured(
+			['decide', '--preset', 'generic', '--local', '--state', 'ticket.txt'],
+			{ 'ticket.txt': 'I was charged twice on my invoice' },
+		);
+		assert.equal(await run(io), EXIT_OK);
+		const decision = JSON.parse(stdout.join('')) as { action: string; target: string };
+		assert.equal(decision.action, 'route');
+		assert.equal(decision.target, 'billing');
+		assert.equal(stderr.join(''), '');
+	});
+
+	it('rejects --local on a preset that has no scripts', async () => {
+		const { io, stderr } = captured(['decide', '--preset', 'attack-triage', '--local', '--state', 'event.txt'], {
+			'event.txt': 'hello',
+		});
+		assert.equal(await run(io), EXIT_ERROR);
+		assert.match(stderr.join(''), /has no local scripts/);
 	});
 
 	it('rejects an unknown preset, bad JSON, and a missing command', async () => {

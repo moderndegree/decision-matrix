@@ -1,7 +1,7 @@
 {
   "name": "n8n-nodes-decision-matrix",
   "version": "0.1.0",
-  "description": "n8n community node that runs a declarative decision matrix against any System One / Jev-compatible server",
+  "description": "n8n community node that runs a declarative decision matrix. A local script or any System One / Jev-compatible server can answer the questions.",
   "license": "MIT",
   "keywords": [
     "n8n-community-node-package",

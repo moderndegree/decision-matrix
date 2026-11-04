@@ -11,7 +11,10 @@ import {
 	callSystemOne,
 	normalizeSystemOneResponse,
 	readState,
+	runScripts,
+	unansweredQuestions,
 	validateQuestions,
+	validateScripts,
 	type SystemOneCallOptions,
 } from 'decision-matrix-systemone';
 
@@ -34,8 +37,10 @@ export interface DecideRequest {
 	state?: unknown;
 	questions: unknown;
 	rules: unknown;
-	/** Saved System One response, or a bare answers map. Skips the server. */
+	/** Saved System One response, or a bare answers map. Skips the server and any scripts. */
 	answers?: unknown;
+	/** Local scripts. Questions they answer are not sent to the server. */
+	scripts?: unknown;
 	thresholds?: Record<string, number>;
 	/** Values the caller verified. Rules read them. They are not sent to the server. */
 	facts?: FactMap;
@@ -59,16 +64,21 @@ export interface DecideResult {
 }
 
 /**
- * Check the ruleset and the facts, then either evaluate saved answers or call
- * the decision server. Both are checked before the server is contacted. When
- * facts alone decide, the server is not called and `answers` is empty.
+ * Check the ruleset, the facts, and any scripts, then evaluate saved answers,
+ * local scripts, or the decision server. All of that is checked before the
+ * server is contacted. When facts alone decide, the server is not called and
+ * `answers` is empty. A question a script answers is left out of the request.
  */
 export async function decide(request: DecideRequest): Promise<DecideResult> {
-	// Fail a bad ruleset or a missing fact before the server call. evaluateRules
-	// reads the original document; the object returned here is the condition tree.
+	// Fail a bad ruleset, a missing fact, or a bad script before the server call.
+	// evaluateRules reads the original document; the object returned here is the condition tree.
 	assertThresholdsResolve(request.rules, request.thresholds);
 	assertFactsResolve(request.rules, request.facts);
 	const questions = validateQuestions(request.questions);
+	if (request.answers !== undefined && request.scripts !== undefined) {
+		throw new Error('Pass saved answers or scripts, not both.');
+	}
+	const program = request.scripts !== undefined ? validateScripts(request.scripts, questions) : undefined;
 	const fromFacts = decideFromFacts(request.rules, request.facts, request.thresholds);
 	if (fromFacts) {
 		const record: DecisionRecord = { ...fromFacts, answers: {} };
@@ -77,7 +87,7 @@ export async function decide(request: DecideRequest): Promise<DecideResult> {
 	const answers =
 		request.answers !== undefined
 			? readAnswers(request.answers)
-			: await askServer(request.state, questions, request.server);
+			: await resolveAnswers(request.state, questions, program, request.server);
 	const decision = evaluateRules(request.rules, answers, request.thresholds, request.facts);
 	const record: DecisionRecord = { ...decision, answers };
 	const exitCode = request.failOnGate && record.gate ? EXIT_GATE : EXIT_OK;
@@ -90,19 +100,34 @@ export function readAnswers(value: unknown): Record<string, AnswerView> {
 	return normalizeSystemOneResponse(envelope).answers;
 }
 
+async function resolveAnswers(
+	state: unknown,
+	questions: Record<string, unknown>,
+	program: ReturnType<typeof validateScripts> | undefined,
+	server: DecideServer | undefined,
+): Promise<Record<string, AnswerView>> {
+	const local = program ? runScripts(program, requireState(state)) : {};
+	const remaining = unansweredQuestions(questions, local);
+	if (Object.keys(remaining).length === 0) return local;
+	const remote = await askServer(state, remaining, server, program !== undefined);
+	return { ...remote, ...local };
+}
+
 async function askServer(
 	state: unknown,
 	questions: Record<string, unknown>,
 	server: DecideServer | undefined,
+	scriptsRan: boolean,
 ): Promise<Record<string, AnswerView>> {
 	if (server === undefined || server.baseUrl.trim() === '') {
+		const unanswered = Object.keys(questions);
 		throw new Error(
-			'A decision server URL is required. Pass --server or set DECISION_SERVER_URL. Pass --answers to evaluate a saved answer file instead.',
+			scriptsRan
+				? `A decision server URL is required. Scripts did not answer: ${unanswered.join(', ')}. Pass --server for those, or add a step that answers them.`
+				: 'A decision server URL is required. Pass --server or set DECISION_SERVER_URL. Pass --answers to evaluate a saved answer file, or --local or --scripts to answer with scripts instead of a model.',
 		);
 	}
-	if (state === undefined || (typeof state === 'string' && state.trim() === '')) {
-		throw new Error('State is required. Pass --state or pipe the event on stdin.');
-	}
+	requireState(state);
 	const result = await callSystemOne({
 		baseUrl: server.baseUrl,
 		apiKey: server.apiKey,
@@ -113,6 +138,13 @@ async function askServer(
 		questions,
 	});
 	return result.answers;
+}
+
+function requireState(state: unknown): unknown {
+	if (state === undefined || (typeof state === 'string' && state.trim() === '')) {
+		throw new Error('State is required. Pass --state or pipe the event on stdin.');
+	}
+	return state;
 }
 
 function looksLikeEnvelope(value: Record<string, unknown>): boolean {

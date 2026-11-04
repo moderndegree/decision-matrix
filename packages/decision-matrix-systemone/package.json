@@ -1,7 +1,7 @@
 {
   "name": "decision-matrix-systemone",
   "version": "0.1.0",
-  "description": "Client and normalizer for the System One POST /v1/systemone decision protocol.",
+  "description": "System One client, response normalizer, and local scripts that answer the same questions.",
   "license": "MIT",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

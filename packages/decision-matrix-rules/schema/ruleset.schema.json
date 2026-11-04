@@ -19,7 +19,7 @@
     },
     "thresholds": { "$ref": "#/$defs/thresholds" },
     "default_action": {
-      "description": "Applies when no rule matches. A security policy should hold here (gate true).",
+      "description": "Applies when no rule matches. Set gate true when an unrecognized event must not proceed.",
       "$ref": "#/$defs/action"
     },
     "rules": {

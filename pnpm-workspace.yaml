@@ -1,8 +1,8 @@
 packages:
   - packages/*
 
-# Supply-chain settings. This repository builds a security gate, so its own
-# dependencies get the same scrutiny.
+# Supply-chain settings. A decision from this repository can open a gate,
+# so its own dependencies get the same scrutiny.
 #
 # A version must be a week old before pnpm installs it. Most malicious
 # releases are found and pulled within hours. (pnpm 11 defaults to one day.)

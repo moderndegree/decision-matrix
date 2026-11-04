@@ -12,6 +12,8 @@ A **client** sends `{ state, questions }` and normalizes the response into an an
 
 A **rules engine** turns that answer map and a version 1 ruleset into one action. `decision-matrix-rules` does that with no I/O. Evaluate locally. Do not put this step behind another service: a bad ruleset should fail before the server is called, and the ruleset belongs to the caller.
 
+A **script** answers some or all of the questions on the caller. It reads the same state and returns the same answer view. Questions it answers are left out of the request. When it answers every question, the server is not called. `validateScripts` and `runScripts` are the reference. The script is data, so a host in another language can implement the matchers below and get the same answers.
+
 The `decision-matrix` command in `decision-matrix-cli` is a local host. It reads one event, calls this protocol, and evaluates the ruleset in-process.
 
 Text framing, secret redaction, circuit breakers, and security scanners are host concerns. They are not part of this protocol. A guard can redact and frame `state`, call this client, then apply its own policy or a ruleset. Facts a ruleset reads (`{ "fact": ... }` predicates) stay with the host and are never part of the request body.
@@ -92,15 +94,60 @@ Output confidence is the minimum `bestEffortConfidence` of the questions the win
 
 Schema: `decision-matrix-rules/schema/ruleset.schema.json`.
 
+## Local scripts
+
+Version 1. Schema: `schema/scripts.schema.json`. A script is not part of the request body.
+
+```json
+{
+  "version": 1,
+  "scripts": [
+    { "question": "category", "word": ["invoice", "refund"], "choice": "billing", "confidence": 0.96 },
+    { "question": "category", "else": true, "choice": "other", "confidence": 0.45 }
+  ]
+}
+```
+
+Steps run in order. The first step that matches a question writes that answer, and later steps for the same question are skipped. `else` matches when nothing earlier answered that question, and it has to be the last step for that question.
+
+A step has one matcher and one answer.
+
+| Matcher | Match |
+| --- | --- |
+| `contains` | The needle is a substring of the searched text. |
+| `word` | The needle appears with a boundary on each side. A boundary is the end of the text or a character that is not an ASCII letter, digit, or `_`. |
+| `tag` | The searched text starts with the needle, and the next character is `:` or `(`. `feat` matches `feat:` and `feat(api):`. It does not match `feature:` or `feat add`. |
+| `equals` | `{ "path", "value" }` compared with strict equality. A string is case-sensitive. A missing path does not match. |
+| `else` | `true`. No path. |
+
+`contains`, `word`, and `tag` take a string or a list of strings. Any one needle can match. Needles are compared in ASCII lowercase: `A`–`Z` fold to `a`–`z`, and no other character changes, so `É` and `é` stay different. The fold happens once, when the script is compiled.
+
+`path` limits `contains`, `word`, and `tag` to those fields. It is a dotted path or a list of them (`title`, `commit.type`, `items.0.subject`). Any listed field can match. Names start with a letter or `_`. Indexes are `0` or a number without a leading zero. A path nests at most 32 segments. `__proto__`, `prototype`, and `constructor` are rejected. `else` and `equals` do not take a step `path`.
+
+Where the text comes from:
+
+- A string state is the whole text. `tag` with no `path` reads it from the first character.
+- An object or array joins every string leaf with `\n`, object keys in ascending UTF-16 order, array items in index order. Numbers, booleans, and null are left out of that text. `contains` and `word` with no `path` search the joined text. `tag` with no `path` does not: a tag is a prefix, and the joined text has no single start that a host should guess.
+- A `path` reads one field. The match runs only when that field is a string. `equals` reads the field as its JSON value.
+
+`choice` and `score` require `confidence` from 0 to 1. The answer view also carries `probabilities` of `{ "<choice or score>": confidence }`, which is what a one-label server response normalizes to. `noul` is the yes-probability from 0 to 1 and carries no `confidence`. The rules engine turns that into decisiveness itself.
+
+`generic`, `sdlc`, and `support` ship with scripts that answer every question, so those presets can run with no server. `attack-triage`, `ci-change`, and `access-review` do not. A script reads the state you give it. It is not a fact, and a keyword match is not a verification.
+
 ## Reference API
 
 ```ts
-import { callSystemOne, normalizeSystemOneResponse, readState } from 'decision-matrix-systemone';
+import { callSystemOne, normalizeSystemOneResponse, readState, runScripts, unansweredQuestions, validateScripts } from 'decision-matrix-systemone';
 import { assertThresholdsResolve, evaluateRules } from 'decision-matrix-rules';
 
 assertThresholdsResolve(ruleset, overrides);
-const result = await callSystemOne({ baseUrl, apiKey, state, questions, model, timeoutMs });
-const decision = evaluateRules(ruleset, result.answers, overrides);
+const program = validateScripts(scripts, questions);
+const local = runScripts(program, state);
+const remaining = unansweredQuestions(questions, local);
+const remote = Object.keys(remaining).length === 0
+  ? { answers: {} }
+  : await callSystemOne({ baseUrl, apiKey, state, questions: remaining, model, timeoutMs });
+const decision = evaluateRules(ruleset, { ...remote.answers, ...local }, overrides);
 ```
 
 `decision` is `{ action, target, reason, gate, matched_rule, confidence }`.

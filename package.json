@@ -1,7 +1,7 @@
 {
   "name": "decision-matrix",
   "private": true,
-  "description": "Decision matrix rules engine, System One client, CLI, TUI, and n8n node",
+  "description": "Decision matrix rules engine, local answer scripts, System One client, CLI, TUI, and n8n node",
   "license": "MIT",
   "packageManager": "pnpm@11.25.0",
   "scripts": {

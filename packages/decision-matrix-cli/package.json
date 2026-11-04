@@ -1,7 +1,7 @@
 {
   "name": "decision-matrix-cli",
   "version": "0.1.0",
-  "description": "Local command that classifies one event with a System One server and a first-match ruleset.",
+  "description": "Local command that classifies one event with a first-match ruleset. A script or a System One server answers the questions.",
   "license": "MIT",
   "bin": {
     "decision-matrix": "./dist/cli.js"

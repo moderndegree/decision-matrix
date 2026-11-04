@@ -7,11 +7,12 @@ import {
 	readOptions,
 	readQuestions,
 	readRulesInput,
+	readScripts,
 	readState,
 	readThresholdOverrides,
 } from '../nodes/DecisionMatrix/parameters';
 import { evaluateRules, type AnswerView } from 'decision-matrix-rules';
-import { GENERIC_TRIAGE_QUESTIONS, normalizeSystemOneResponse } from 'decision-matrix-systemone';
+import { GENERIC_TRIAGE_QUESTIONS, normalizeSystemOneResponse, runScripts } from 'decision-matrix-systemone';
 
 describe('readState', () => {
 	it('keeps text, objects, arrays, and JSON text', () => {
@@ -27,6 +28,16 @@ describe('readState', () => {
 		assert.equal(readState('"quoted text"'), '"quoted text"');
 		assert.throws(() => readState('["ok",'), /could not be parsed/);
 		assert.throws(() => readState(12), /string, object, or array/);
+	});
+});
+
+describe('readScripts', () => {
+	it('uses the built-in script for a preset and ignores scripts in server mode', () => {
+		assert.equal(readScripts('server', 'generic', '{', {}), undefined);
+		const program = readScripts('scripts', 'sdlc', '{}', undefined);
+		assert.equal(runScripts(program!, 'feat: add export').change_type?.choice, 'feature');
+		assert.throws(() => readScripts('scripts', 'generic', {}, { kind: { type: 'noul', instructions: 'Is it fine' } }), /Paste a scripts/);
+		assert.throws(() => readScripts('nope', 'generic', {}, {}), /unknown/);
 	});
 });
 
