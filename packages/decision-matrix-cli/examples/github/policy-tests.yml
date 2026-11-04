@@ -29,8 +29,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # Full history, so the base version of the policy is available to diff.
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - uses: actions/setup-node@v4
@@ -49,3 +51,22 @@ jobs:
           npx --yes --package decision-matrix-cli@0.1.0 decision-matrix test --require-coverage \
             --rules .github/decision-matrix/ci-change.rules.json \
             --cases .github/decision-matrix/ci-change.cases.json
+
+      # Writes what the change does to the job summary: which rules loosen or
+      # tighten, and which cases now get a different decision. Add
+      # --fail-on-loosen to require a second look, for example by making this
+      # a required check and listing .github/decision-matrix/ in CODEOWNERS.
+      - name: Explain the policy change
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          base="$RUNNER_TEMP/base.rules.json"
+          if git show "$BASE_SHA:.github/decision-matrix/ci-change.rules.json" > "$base" 2>/dev/null; then
+            npx --yes --package decision-matrix-cli@0.1.0 decision-matrix diff --format markdown \
+              --from "$base" \
+              --to .github/decision-matrix/ci-change.rules.json \
+              --cases .github/decision-matrix/ci-change.cases.json >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No base policy to compare. This PR adds it." >> "$GITHUB_STEP_SUMMARY"
+          fi

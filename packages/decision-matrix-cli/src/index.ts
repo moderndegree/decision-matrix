@@ -6,3 +6,5 @@ export { readFileFromDisk, run } from './run';
 export type { CliIO } from './run';
 export { formatCaseRun, formatWhy, readCases, runCases, uncovered } from './cases';
 export type { CaseExpectation, CaseResult, CaseRun, PolicyCase } from './cases';
+export { decideCase, type CaseDecision } from './cases';
+export { diffPolicies, formatPolicyDiff, type CaseChange, type PolicyDiff } from './diff';

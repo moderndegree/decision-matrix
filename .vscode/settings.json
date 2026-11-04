@@ -1,0 +1,20 @@
+{
+  "json.schemas": [
+    {
+      "fileMatch": ["*.rules.json"],
+      "url": "./packages/decision-matrix-rules/schema/ruleset.schema.json"
+    },
+    {
+      "fileMatch": ["*.questions.json"],
+      "url": "./packages/decision-matrix-systemone/schema/questions.schema.json"
+    },
+    {
+      "fileMatch": ["*.cases.json"],
+      "url": "./packages/decision-matrix-cli/schema/cases.schema.json"
+    },
+    {
+      "fileMatch": ["*.facts.json", "**/facts.json"],
+      "url": "./packages/decision-matrix-rules/schema/facts.schema.json"
+    }
+  ]
+}

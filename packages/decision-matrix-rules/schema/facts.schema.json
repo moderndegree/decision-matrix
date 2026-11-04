@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "decision-matrix-rules/schema/facts.schema.json",
+  "title": "Decision matrix facts",
+  "description": "Values the host verified itself, for fact predicates. Never sent to the decision server. Build them from systems of record, not from the request.",
+  "$comment": "validateFacts in decision-matrix-rules accepts exactly the documents this schema accepts, and also limits nesting to 32 levels. A rule that reads a fact checks its type when it runs.",
+  "$ref": "#/$defs/node",
+  "$defs": {
+    "scalar": { "type": ["string", "number", "boolean", "null"] },
+    "node": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$",
+        "not": { "enum": ["__proto__", "prototype", "constructor"] }
+      },
+      "additionalProperties": {
+        "anyOf": [
+          { "$ref": "#/$defs/scalar" },
+          { "type": "array", "items": { "$ref": "#/$defs/scalar" } },
+          { "$ref": "#/$defs/node" }
+        ]
+      }
+    }
+  }
+}

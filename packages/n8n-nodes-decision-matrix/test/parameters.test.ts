@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import { buildItemOutput, noMatchMessage } from '../nodes/DecisionMatrix/output';
 import {
+	readFactsInput,
 	readOptions,
 	readQuestions,
 	readRulesInput,
@@ -39,7 +40,7 @@ describe('readQuestions', () => {
 		assert.deepEqual(readQuestions('custom', ''), GENERIC_TRIAGE_QUESTIONS);
 
 		const override = readQuestions('sdlc', {
-			task_type: { type: 'choice', instructions: 'Which kind of task is this' },
+			task_type: { type: 'choice', instructions: 'Which kind of task is this', criteria: { bug: 'Broken behavior', chore: null } },
 		});
 		assert.deepEqual(Object.keys(override), ['task_type']);
 		assert.equal(override.change_type, undefined);
@@ -50,7 +51,11 @@ describe('readQuestions', () => {
 			refund: { type: 'noul', instructions: 'A refund was requested' },
 		});
 		assert.equal((custom.refund as { type: string }).type, 'noul');
-		assert.throws(() => readQuestions('generic', { refund: { instructions: 'missing type' } }), /type is required/);
+		assert.throws(() => readQuestions('generic', { refund: { instructions: 'missing type' } }), /type must be "choice", "noul", or "score"/);
+		assert.throws(() => readQuestions('custom', { refund: { type: 'noul' } }), /instructions must say what the model is asked/);
+		assert.throws(() => readQuestions('custom', { kind: { type: 'choice', instructions: 'Which' } }), /must map each label/);
+		assert.throws(() => readQuestions('custom', { risk: { type: 'score', instructions: 'How risky', criteria: ['only one'] } }), /at least two levels/);
+		assert.throws(() => readQuestions('custom', { ok: { type: 'noul', instructions: 'Fine', criteria: ['x'] } }), /not used by a noul question/);
 		assert.throws(() => readQuestions('custom', []), /JSON object/);
 		assert.throws(() => readQuestions('custom', '{'), /not valid JSON/);
 		assert.throws(() => readQuestions('nope', {}), /unknown/);
@@ -143,5 +148,16 @@ describe('buildItemOutput', () => {
 		assert.equal('raw_response' in slim, false);
 		assert.equal('usage' in slim, false);
 		assert.match(noMatchMessage(evaluation), /Fail on no matching rule/);
+	});
+});
+
+describe('readFactsInput', () => {
+	it('accepts an object or JSON text and treats empty as no facts', () => {
+		assert.deepEqual(readFactsInput(undefined), {});
+		assert.deepEqual(readFactsInput('  '), {});
+		assert.deepEqual(readFactsInput('{"a":1}'), { a: 1 });
+		assert.deepEqual(readFactsInput({ a: { b: true } }), { a: { b: true } });
+		assert.throws(() => readFactsInput('[1]'), /Facts must be a JSON object/);
+		assert.throws(() => readFactsInput('{'), /Facts are not valid JSON/);
 	});
 });

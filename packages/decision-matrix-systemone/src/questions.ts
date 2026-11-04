@@ -9,6 +9,36 @@ export interface SystemOneQuestion {
 	criteria?: Record<string, string | null> | readonly string[];
 }
 
+function assertCriteria(key: string, type: 'choice' | 'noul' | 'score', criteria: unknown): void {
+	const path = `questions.${key}.criteria`;
+	if (type === 'noul') {
+		if (criteria !== undefined) throw new SystemOneError(`${path} is not used by a noul question. Remove it, or make the question a choice or a score.`);
+		return;
+	}
+	if (type === 'score') {
+		if (!Array.isArray(criteria) || criteria.length < 2 || !criteria.every((level) => typeof level === 'string')) {
+			throw new SystemOneError(`${path} must list at least two levels, lowest first, for a score question.`);
+		}
+		return;
+	}
+	if (Array.isArray(criteria)) {
+		const labels = criteria as unknown[];
+		if (labels.length === 0 || !labels.every((label) => typeof label === 'string' && label !== '') || new Set(labels).size !== labels.length) {
+			throw new SystemOneError(`${path} must list at least one label, each non-empty and different.`);
+		}
+		return;
+	}
+	if (!isPlainObject(criteria) || Object.keys(criteria).length === 0) {
+		throw new SystemOneError(`${path} must map each label to a description (or null) for a choice question.`);
+	}
+	for (const [label, description] of Object.entries(criteria)) {
+		if (label === '') throw new SystemOneError(`${path} has an empty label.`);
+		if (description !== null && typeof description !== 'string') {
+			throw new SystemOneError(`${path}.${label} must be a description or null.`);
+		}
+	}
+}
+
 /**
  * State is a string, a JSON object, or a JSON array. A string that starts
  * with `{` or `[` is parsed as JSON. Any other string is sent as text.
@@ -45,18 +75,31 @@ export function validateQuestions(value: unknown): Record<string, unknown> {
 			`Questions must be a JSON object keyed by question id. Received ${describeValue(value)}.`,
 		);
 	}
+	// Accepts exactly what schema/questions.schema.json accepts. `$schema` is for
+	// editors and is not sent to the server.
 	const questions: Record<string, unknown> = {};
 	for (const [key, question] of Object.entries(value)) {
+		if (key === '$schema') {
+			if (typeof question !== 'string') throw new SystemOneError('questions.$schema must be a string.');
+			continue;
+		}
 		if (key.trim() === '' || /\s/.test(key)) {
 			throw new SystemOneError(`Question id "${key}" must be a non-empty string without spaces.`);
 		}
 		if (!isPlainObject(question)) {
 			throw new SystemOneError(`questions.${key} must be an object with a type and instructions.`);
 		}
-		if (typeof question.type !== 'string' || question.type.trim() === '') {
-			throw new SystemOneError(`questions.${key}.type is required. Use "choice", "noul", or "score".`);
+		if (question.type !== 'choice' && question.type !== 'noul' && question.type !== 'score') {
+			throw new SystemOneError(`questions.${key}.type must be "choice", "noul", or "score". Received ${JSON.stringify(question.type)}.`);
 		}
+		if (typeof question.instructions !== 'string' || question.instructions.trim() === '') {
+			throw new SystemOneError(`questions.${key}.instructions must say what the model is asked.`);
+		}
+		assertCriteria(key, question.type, question.criteria);
 		questions[key] = question;
+	}
+	if (Object.keys(questions).length === 0) {
+		throw new SystemOneError('Questions must contain at least one question.');
 	}
 	return questions;
 }

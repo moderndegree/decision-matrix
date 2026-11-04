@@ -1,42 +1,13 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 
 import { ATTACK_TRIAGE_RULES, referencedQuestions, validateRuleset } from 'decision-matrix-rules';
 import { ATTACK_TRIAGE_QUESTIONS } from 'decision-matrix-systemone';
-import { decide, EXIT_ERROR, EXIT_GATE, EXIT_OK, run, type CliIO } from 'decision-matrix-cli';
 
-const root = path.resolve(__dirname, '..');
-const examples = path.join(root, 'packages/decision-matrix-cli/examples');
-
-function readExample(name: string): string {
-	return readFileSync(path.join(examples, name), 'utf8');
-}
-
-function captured(argv: string[], files: Record<string, string> = {}, extra: Partial<CliIO> = {}) {
-	const stdout: string[] = [];
-	const stderr: string[] = [];
-	const io: CliIO = {
-		argv,
-		env: extra.env ?? {},
-		stdinIsTTY: extra.stdinIsTTY ?? true,
-		readStdin: extra.readStdin ?? (async () => ''),
-		readFile: async (filePath) => {
-			const text = files[filePath];
-			if (text === undefined) throw new Error(`Could not read ${filePath}. missing`);
-			return text;
-		},
-		stdout: (text) => {
-			stdout.push(text);
-		},
-		stderr: (text) => {
-			stderr.push(text);
-		},
-	};
-	return { io, stdout, stderr };
-}
+import { decide, EXIT_ERROR, EXIT_GATE, EXIT_OK, run } from '../src';
+import { captured, examples, packageRoot as root, readExample } from './fixtures';
 
 describe('attack-triage files', () => {
 	it('matches the exported preset', () => {
@@ -209,7 +180,7 @@ describe('decision-matrix decide', () => {
 describe('decision-matrix bin', () => {
 	it('exits 2 for a held event', () => {
 		const tsx = path.join(root, 'node_modules/.bin/tsx');
-		const cli = path.join(root, 'packages/decision-matrix-cli/src/cli.ts');
+		const cli = path.join(root, 'src/cli.ts');
 		const answers = path.join(examples, 'attack-triage.block.answers.json');
 		const result = spawnSync(
 			tsx,

@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "decision-matrix-systemone/schema/questions.schema.json",
+  "title": "Decision matrix questions",
+  "description": "The questions sent to a System One server, keyed by the id rules use (answers.<id>). The same object is the questions field of a request.",
+  "$comment": "validateQuestions in decision-matrix-systemone accepts exactly the documents this schema accepts. A server may read extra question fields, so they are allowed.",
+  "type": "object",
+  "minProperties": 1,
+  "properties": {
+    "$schema": {
+      "description": "Optional. Lets an editor find this schema. It is removed before the questions are sent.",
+      "type": "string"
+    }
+  },
+  "propertyNames": {
+    "type": "string",
+    "pattern": "^\\S+$"
+  },
+  "additionalProperties": {
+    "$ref": "#/$defs/question"
+  },
+  "$defs": {
+    "question": {
+      "type": "object",
+      "required": [
+        "type",
+        "instructions"
+      ],
+      "properties": {
+        "type": {
+          "description": "choice picks one label, noul is a yes-probability from 0 to 1, and score picks a level by index.",
+          "enum": [
+            "choice",
+            "noul",
+            "score"
+          ]
+        },
+        "instructions": {
+          "description": "What the model is asked, in plain words.",
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "criteria": {
+          "description": "choice: a map of label to description (null for none), or a list of labels. score: the levels from lowest (0) to highest. noul has none."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "choice"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "criteria"
+            ],
+            "properties": {
+              "criteria": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "minProperties": 1,
+                    "propertyNames": {
+                      "minLength": 1
+                    },
+                    "additionalProperties": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "score"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "criteria"
+            ],
+            "properties": {
+              "criteria": {
+                "type": "array",
+                "minItems": 2,
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "noul"
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "criteria"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
+  "not": {
+    "description": "$schema alone is not a question.",
+    "required": [
+      "$schema"
+    ],
+    "maxProperties": 1
+  }
+}

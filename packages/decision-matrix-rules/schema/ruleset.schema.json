@@ -2,95 +2,88 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "decision-matrix-rules/schema/ruleset.schema.json",
   "title": "Decision matrix ruleset",
-  "description": "Version 1 first-match policy over normalized System One answers and host-verified facts. The TypeScript parser in decision-matrix-rules is the reference implementation. It rejects unknown keys, mixed choice and numeric operators on one question predicate, threshold names that do not resolve, and, under open_gate_requires_facts, any rule that model answers alone could use to open the gate.",
+  "description": "Version 1 first-match policy over normalized System One answers and host-verified facts. Rules run in order and the first whose when is true wins. If none matches, default_action applies.",
+  "$comment": "validateRuleset in decision-matrix-rules is the reference. It accepts exactly the documents this schema accepts, and also checks what JSON Schema cannot: rule ids are unique, every referenced threshold resolves after overrides, conditions nest at most 32 levels, and with open_gate_requires_facts the default holds and every rule with gate false requires a fact on every path through when.",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "version",
-    "default_action",
-    "rules"
-  ],
+  "required": ["version", "default_action", "rules"],
   "properties": {
-    "version": {
-      "const": 1
+    "$schema": {
+      "description": "Optional. Lets an editor find this schema. Ignored by the engine.",
+      "type": "string"
     },
-    "thresholds": {
-      "$ref": "#/$defs/thresholds"
+    "version": { "const": 1 },
+    "open_gate_requires_facts": {
+      "description": "When true, default_action.gate must be true, and every rule with gate false must require a fact predicate on every path through its when (a fact under all, or under every branch of any). Model answers can then only hold.",
+      "type": "boolean"
     },
+    "thresholds": { "$ref": "#/$defs/thresholds" },
     "default_action": {
+      "description": "Applies when no rule matches. A security policy should hold here (gate true).",
       "$ref": "#/$defs/action"
     },
     "rules": {
       "type": "array",
-      "items": {
-        "$ref": "#/$defs/rule"
-      }
-    },
-    "open_gate_requires_facts": {
-      "type": "boolean",
-      "description": "When true, default_action.gate must be true, and every rule with gate false must require a fact predicate on every path through its when (a fact under all, or under every branch of any). Model answers can then only hold."
+      "items": { "$ref": "#/$defs/rule" }
     }
   },
   "$defs": {
     "identifier": {
       "type": "string",
-      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+      "not": { "enum": ["__proto__", "prototype", "constructor"] }
+    },
+    "text": {
+      "description": "A string with at least one non-space character.",
+      "type": "string",
+      "pattern": "\\S"
     },
     "thresholds": {
+      "description": "Named numbers that conditions reference. A caller can override any of them for one evaluation.",
       "type": "object",
-      "additionalProperties": {
-        "type": "number"
-      },
-      "propertyNames": {
-        "$ref": "#/$defs/identifier"
-      }
+      "propertyNames": { "$ref": "#/$defs/identifier" },
+      "additionalProperties": { "type": "number" }
     },
     "operand": {
-      "description": "A finite number, a threshold name, {{thresholds.name}}, or {\"threshold\":\"name\"}.",
+      "description": "A number, a numeric string, a threshold name, {{thresholds.name}}, or {\"threshold\": \"name\"}.",
       "oneOf": [
-        {
-          "type": "number"
-        },
+        { "type": "number" },
         {
           "type": "string",
-          "minLength": 1
+          "pattern": "^(?:[A-Za-z_][A-Za-z0-9_]*|\\{\\{\\s*thresholds\\.[A-Za-z_][A-Za-z0-9_]*\\s*\\}\\}|[-+]?(?:[0-9]+\\.?[0-9]*|\\.[0-9]+)(?:[eE][-+]?[0-9]+)?)$",
+          "not": { "enum": ["__proto__", "prototype", "constructor"] }
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "threshold"
-          ],
-          "properties": {
-            "threshold": {
-              "$ref": "#/$defs/identifier"
-            }
-          }
+          "required": ["threshold"],
+          "properties": { "threshold": { "$ref": "#/$defs/identifier" } }
         }
       ]
+    },
+    "label": {
+      "description": "A choice label, compared literally and case-sensitively. A number is read as its string form.",
+      "oneOf": [{ "type": "string", "minLength": 1 }, { "type": "number" }]
     },
     "action": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "type",
-        "target",
-        "reason"
-      ],
+      "required": ["type", "target", "reason"],
       "properties": {
         "type": {
-          "type": "string",
-          "minLength": 1
+          "description": "The output field action, for example hold, block, pass, or review.",
+          "$ref": "#/$defs/text"
         },
         "target": {
-          "type": "string",
-          "minLength": 1
+          "description": "Who or what handles it. May contain {{answers.<id>.<field>}}, {{thresholds.<name>}}, and {{facts.<path>}}.",
+          "$ref": "#/$defs/text"
         },
         "reason": {
-          "type": "string",
-          "minLength": 1
+          "description": "Why, for people. Same placeholders as target.",
+          "$ref": "#/$defs/text"
         },
         "gate": {
+          "description": "True holds: automation must not proceed. False opens the gate. Defaults to false when omitted.",
           "type": "boolean"
         }
       }
@@ -98,132 +91,97 @@
     "rule": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "id",
-        "when",
-        "action"
-      ],
+      "required": ["id", "when", "action"],
       "properties": {
         "id": {
+          "description": "Unique within the ruleset. No spaces.",
           "type": "string",
-          "minLength": 1,
           "pattern": "^\\S+$"
         },
-        "description": {
-          "type": "string"
-        },
-        "when": {
-          "$ref": "#/$defs/condition"
-        },
-        "action": {
-          "$ref": "#/$defs/action"
-        }
+        "description": { "type": "string" },
+        "when": { "$ref": "#/$defs/condition" },
+        "action": { "$ref": "#/$defs/action" }
       }
     },
     "condition": {
       "oneOf": [
         {
+          "title": "All of",
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "all"
-          ],
+          "required": ["all"],
           "properties": {
-            "all": {
-              "type": "array",
-              "minItems": 1,
-              "items": {
-                "$ref": "#/$defs/condition"
-              }
-            }
+            "all": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/condition" } }
           }
         },
         {
+          "title": "Any of",
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "any"
-          ],
+          "required": ["any"],
           "properties": {
-            "any": {
-              "type": "array",
-              "minItems": 1,
-              "items": {
-                "$ref": "#/$defs/condition"
-              }
-            }
+            "any": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/condition" } }
           }
         },
-        {
-          "$ref": "#/$defs/predicate"
-        },
-        {
-          "$ref": "#/$defs/factPredicate"
-        }
+        { "$ref": "#/$defs/predicate" },
+        { "$ref": "#/$defs/factPredicate" }
       ]
     },
     "predicate": {
+      "title": "Question predicate",
+      "description": "Compares one model answer. Several operators on one predicate must all hold. Choice operators (eq, neq, in, not_in) fit choice questions. Numeric operators (gte, gt, lte, lt) fit noul and score questions. Confidence operators fit choice and score.",
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "question"
-      ],
+      "required": ["question"],
+      "minProperties": 2,
       "properties": {
-        "question": {
+        "question": { "type": "string", "pattern": "^\\S+$" },
+        "eq": { "$ref": "#/$defs/label" },
+        "neq": { "$ref": "#/$defs/label" },
+        "in": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/label" } },
+        "not_in": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/label" } },
+        "gte": { "$ref": "#/$defs/operand" },
+        "gt": { "$ref": "#/$defs/operand" },
+        "lte": { "$ref": "#/$defs/operand" },
+        "lt": { "$ref": "#/$defs/operand" },
+        "confidence_gte": { "$ref": "#/$defs/operand" },
+        "confidence_lt": { "$ref": "#/$defs/operand" }
+      },
+      "not": {
+        "description": "A question is either a choice or a noul/score, so choice and numeric operators cannot share a predicate.",
+        "allOf": [
+          { "anyOf": [{ "required": ["eq"] }, { "required": ["neq"] }, { "required": ["in"] }, { "required": ["not_in"] }] },
+          { "anyOf": [{ "required": ["gte"] }, { "required": ["gt"] }, { "required": ["lte"] }, { "required": ["lt"] }] }
+        ]
+      }
+    },
+    "factValue": {
+      "description": "A literal compared strictly. A string is never a threshold name here.",
+      "type": ["string", "number", "boolean", "null"]
+    },
+    "factPredicate": {
+      "title": "Fact predicate",
+      "description": "Reads a value the host verified, passed to evaluateRules separately from the answers and never sent to the server. A missing fact, or a value of the wrong type for the operator, is an evaluation error rather than false. eq, neq, in, and not_in need a scalar fact whose type matches an operand (or null). contains and not_contains need an array of scalars. gte, gt, lte, and lt need a finite number.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fact"],
+      "minProperties": 2,
+      "properties": {
+        "fact": {
+          "description": "A dotted path through nested objects, for example grant.privileged.",
           "type": "string",
-          "minLength": 1,
-          "pattern": "^\\S+$"
+          "pattern": "^(?!(?:.*\\.)?(?:__proto__|prototype|constructor)(?:\\.|$))[A-Za-z_][A-Za-z0-9_-]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*$"
         },
-        "eq": {
-          "type": [
-            "string",
-            "number"
-          ]
-        },
-        "neq": {
-          "type": [
-            "string",
-            "number"
-          ]
-        },
-        "in": {
-          "type": "array",
-          "minItems": 1,
-          "items": {
-            "type": [
-              "string",
-              "number"
-            ]
-          }
-        },
-        "not_in": {
-          "type": "array",
-          "minItems": 1,
-          "items": {
-            "type": [
-              "string",
-              "number"
-            ]
-          }
-        },
-        "gte": {
-          "$ref": "#/$defs/operand"
-        },
-        "gt": {
-          "$ref": "#/$defs/operand"
-        },
-        "lte": {
-          "$ref": "#/$defs/operand"
-        },
-        "lt": {
-          "$ref": "#/$defs/operand"
-        },
-        "confidence_gte": {
-          "$ref": "#/$defs/operand"
-        },
-        "confidence_lt": {
-          "$ref": "#/$defs/operand"
-        }
+        "eq": { "$ref": "#/$defs/factValue" },
+        "neq": { "$ref": "#/$defs/factValue" },
+        "in": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/factValue" } },
+        "not_in": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/factValue" } },
+        "contains": { "$ref": "#/$defs/factValue" },
+        "not_contains": { "$ref": "#/$defs/factValue" },
+        "gte": { "$ref": "#/$defs/operand" },
+        "gt": { "$ref": "#/$defs/operand" },
+        "lte": { "$ref": "#/$defs/operand" },
+        "lt": { "$ref": "#/$defs/operand" }
       }
     },
     "answerView": {
@@ -231,95 +189,16 @@
       "description": "The shape evaluateRules reads. decision-matrix-systemone produces it from a server response. Another host can produce the same shape from its own client.",
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "type"
-      ],
+      "required": ["type"],
       "properties": {
-        "type": {
-          "enum": [
-            "choice",
-            "noul",
-            "score"
-          ]
-        },
-        "choice": {
-          "type": "string"
-        },
-        "noul": {
-          "type": "number"
-        },
-        "score": {
-          "type": "number"
-        },
-        "confidence": {
-          "type": "number"
-        },
+        "type": { "enum": ["choice", "noul", "score"] },
+        "choice": { "type": "string" },
+        "noul": { "type": "number" },
+        "score": { "type": "number" },
+        "confidence": { "type": "number" },
         "probabilities": {
           "type": "object",
-          "additionalProperties": {
-            "type": "number"
-          }
-        }
-      }
-    },
-    "factValue": {
-      "description": "A literal compared strictly. A string is never a threshold name here.",
-      "type": [
-        "string",
-        "number",
-        "boolean",
-        "null"
-      ]
-    },
-    "factPredicate": {
-      "description": "Reads a value the host verified, passed to evaluateRules separately from the answers and never sent to the server. A missing fact, or a value of the wrong type for the operator, is an evaluation error rather than false. eq, neq, in, and not_in need a scalar fact whose type matches an operand (or null). contains and not_contains need an array of scalars. gte, gt, lte, and lt need a finite number.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "fact"
-      ],
-      "properties": {
-        "fact": {
-          "type": "string",
-          "pattern": "^[A-Za-z_][A-Za-z0-9_-]*(\\.[A-Za-z_][A-Za-z0-9_-]*)*$"
-        },
-        "eq": {
-          "$ref": "#/$defs/factValue"
-        },
-        "neq": {
-          "$ref": "#/$defs/factValue"
-        },
-        "in": {
-          "type": "array",
-          "minItems": 1,
-          "items": {
-            "$ref": "#/$defs/factValue"
-          }
-        },
-        "not_in": {
-          "type": "array",
-          "minItems": 1,
-          "items": {
-            "$ref": "#/$defs/factValue"
-          }
-        },
-        "contains": {
-          "$ref": "#/$defs/factValue"
-        },
-        "not_contains": {
-          "$ref": "#/$defs/factValue"
-        },
-        "gte": {
-          "$ref": "#/$defs/operand"
-        },
-        "gt": {
-          "$ref": "#/$defs/operand"
-        },
-        "lte": {
-          "$ref": "#/$defs/operand"
-        },
-        "lt": {
-          "$ref": "#/$defs/operand"
+          "additionalProperties": { "type": "number" }
         }
       }
     }

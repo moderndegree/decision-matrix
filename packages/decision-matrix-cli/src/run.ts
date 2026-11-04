@@ -5,7 +5,8 @@ import { RulesError, isPlainObject, lintRuleset, type LintFinding, type LintQues
 import { SystemOneError } from 'decision-matrix-systemone';
 
 import { formatCaseRun, readCases, runCases, uncovered } from './cases';
-import { decide, EXIT_ERROR, EXIT_OK } from './decide';
+import { decide, EXIT_ERROR, EXIT_GATE, EXIT_OK } from './decide';
+import { diffPolicies, formatPolicyDiff } from './diff';
 import { DEFAULT_PRESET, POLICY_PRESETS } from './presets';
 
 export interface CliIO {
@@ -25,6 +26,7 @@ Commands:
   decide   Classify one event and print one action
   test     Run policy test cases against a ruleset, without a server
   check    Lint a ruleset without running it
+  diff     Explain what a ruleset change does to the policy
 
 decision-matrix decide — classify one event and print one action
 
@@ -108,6 +110,31 @@ Exit codes:
   0  no errors (and no warnings, with --strict)
   1  errors, or warnings with --strict
 
+decision-matrix diff — explain what a ruleset change does
+
+Classifies each change by its effect, not its text: loosens (holds less or
+opens the gate more), tightens, or needs review. Threshold changes are judged
+through the rules that use them. With --cases, also lists every case whose
+decision changes.
+
+Usage:
+  decision-matrix diff --from <file> --to <file> [options]
+
+Options:
+  --from <file>         The ruleset before the change.
+  --to <file>           The ruleset after the change.
+  --cases <file>        Show which cases now get a different decision.
+  --format <name>       text (default) or markdown, for a PR comment.
+  --json                Print the diff as JSON.
+  --fail-on-loosen      Exit 2 when the change loosens the policy, when a
+                        direction cannot be determined, or when a case that
+                        held now opens the gate.
+
+Exit codes:
+  0  diff printed
+  1  a file could not be read, or a ruleset is invalid
+  2  diff printed and it loosens the policy, because --fail-on-loosen was set
+
 Starter files:
   packages/decision-matrix-cli/examples/attack-triage.questions.json
   packages/decision-matrix-cli/examples/attack-triage.rules.json
@@ -134,6 +161,10 @@ const CLI_OPTIONS = {
 	'require-coverage': { type: 'boolean' },
 	strict: { type: 'boolean' },
 	json: { type: 'boolean' },
+	from: { type: 'string' },
+	to: { type: 'string' },
+	format: { type: 'string' },
+	'fail-on-loosen': { type: 'boolean' },
 	help: { type: 'boolean', short: 'h' },
 } as const;
 
@@ -146,6 +177,7 @@ const COMMAND_OPTIONS: Record<string, ReadonlySet<OptionName>> = {
 	]),
 	test: new Set<OptionName>(['rules', 'preset', 'cases', 'threshold', 'require-coverage', 'json', 'help']),
 	check: new Set<OptionName>(['rules', 'preset', 'questions', 'threshold', 'strict', 'json', 'help']),
+	diff: new Set<OptionName>(['from', 'to', 'cases', 'format', 'json', 'fail-on-loosen', 'help']),
 };
 
 function parseArgv(argv: string[]) {
@@ -197,6 +229,7 @@ export async function run(io: CliIO): Promise<number> {
 	try {
 		if (command === 'test') return await runTest(io, values);
 		if (command === 'check') return await runCheck(io, values);
+		if (command === 'diff') return await runDiff(io, values);
 		const preset = presetFor(typeof values.preset === 'string' ? values.preset : DEFAULT_PRESET);
 		const questions = values.questions ? parseJson(await io.readFile(values.questions), values.questions) : preset.questions;
 		const rules = values.rules ? parseJson(await io.readFile(values.rules), values.rules) : preset.rules;
@@ -285,6 +318,21 @@ async function runCheck(io: CliIO, values: Values): Promise<number> {
 		io.stdout(formatFindings(findings, questions !== undefined));
 	}
 	return failed ? EXIT_ERROR : EXIT_OK;
+}
+
+async function runDiff(io: CliIO, values: Values): Promise<number> {
+	if (!values.from || !values.to) throw new Error('diff needs --from <file> and --to <file>.');
+	const format = values.format ?? 'text';
+	if (format !== 'text' && format !== 'markdown') {
+		throw new Error(`--format must be text or markdown. Received ${JSON.stringify(format)}.`);
+	}
+	const from = parseJson(await io.readFile(values.from), values.from);
+	const to = parseJson(await io.readFile(values.to), values.to);
+	const cases = values.cases ? readCases(parseJson(await io.readFile(values.cases), values.cases), values.cases) : [];
+	const diff = diffPolicies(from, to, cases);
+	if (values.json === true) io.stdout(`${JSON.stringify(diff, null, 2)}\n`);
+	else io.stdout(formatPolicyDiff(diff, values.from, values.to, format === 'markdown'));
+	return values['fail-on-loosen'] === true && diff.loosens ? EXIT_GATE : EXIT_OK;
 }
 
 function formatFindings(findings: LintFinding[], checkedQuestions: boolean): string {

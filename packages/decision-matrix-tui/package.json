@@ -1,0 +1,34 @@
+{
+  "name": "decision-matrix-tui",
+  "version": "0.1.0",
+  "description": "Terminal editor and test bench for decision-matrix policies. Runs on Bun.",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "decision-matrix-tui": "./src/main.tsx"
+  },
+  "scripts": {
+    "start": "bun src/main.tsx",
+    "test": "bun test",
+    "typecheck": "tsc -p tsconfig.json",
+    "compile": "bun scripts/compile.ts"
+  },
+  "dependencies": {
+    "@opentui/core": "^0.7.0",
+    "@opentui/react": "^0.7.0",
+    "decision-matrix-cli": "workspace:^",
+    "decision-matrix-rules": "workspace:^",
+    "decision-matrix-systemone": "workspace:^",
+    "react": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.4",
+    "@types/react": "^19.3.0",
+    "bun": "1.4.4",
+    "typescript": "catalog:"
+  },
+  "engines": {
+    "bun": ">=1.3.14"
+  }
+}

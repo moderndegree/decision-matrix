@@ -9,7 +9,8 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    }
+    },
+    "./schema/*.json": "./schema/*.json"
   },
   "files": [
     "dist",
@@ -18,13 +19,20 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json",
+    "test": "tsx --test test/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p test/tsconfig.json"
   },
   "dependencies": {
-    "decision-matrix-rules": "0.1.0"
+    "decision-matrix-rules": "workspace:^"
   },
   "engines": {
     "node": ">=20.19"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "ajv": "catalog:",
+    "tsx": "catalog:",
+    "typescript": "catalog:"
   }
 }

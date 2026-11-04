@@ -13,7 +13,7 @@ import {
 	referencedQuestions,
 	validateRuleset,
 	type AnswerView,
-} from 'decision-matrix-rules';
+} from '../src';
 
 function choice(choiceValue: string, confidence?: number, probabilities?: Record<string, number>): AnswerView {
 	return {

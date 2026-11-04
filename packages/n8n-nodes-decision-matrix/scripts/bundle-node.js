@@ -21,11 +21,10 @@ esbuild
 		target: 'node20',
 		format: 'cjs',
 		sourcemap: true,
+		// decision-matrix-rules and decision-matrix-systemone resolve through the
+		// workspace to their built dist/ and are bundled in, so installing this
+		// package into n8n does not need them published.
 		external: ['n8n-workflow'],
-		alias: {
-			'decision-matrix-rules': path.join(root, 'packages/decision-matrix-rules/src/index.ts'),
-			'decision-matrix-systemone': path.join(root, 'packages/decision-matrix-systemone/src/index.ts'),
-		},
 		logLevel: 'info',
 	})
 	.catch((error) => {

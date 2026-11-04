@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "decision-matrix-cli/schema/cases.schema.json",
+  "title": "Decision matrix policy cases",
+  "description": "Test cases for a ruleset: facts and saved answers, and the decision the rules must make. decision-matrix test runs them without a server. A case's facts merge over defaults.facts (nested objects merge too), its answers replace default answers by question id, and its thresholds replace default thresholds by name.",
+  "$comment": "readCases in decision-matrix-cli accepts exactly the documents this schema accepts, and also checks that case names are unique. Answers are read with the same dialect tolerance as a server response (see PROTOCOL.md), so aliases such as a missing type are accepted. The facts and thresholds definitions match decision-matrix-rules' facts.schema.json and ruleset.schema.json, and a test keeps them equal.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "cases"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": { "const": 1 },
+    "defaults": {
+      "description": "What most cases share. A case lists only what differs.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "facts": { "$ref": "#/$defs/facts" },
+        "answers": { "$ref": "#/$defs/answers" },
+        "thresholds": { "$ref": "#/$defs/thresholds" }
+      }
+    },
+    "cases": { "type": "array", "items": { "$ref": "#/$defs/case" } }
+  },
+  "$defs": {
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "expect"],
+      "properties": {
+        "name": { "description": "Unique within the file.", "type": "string", "pattern": "\\S" },
+        "facts": { "$ref": "#/$defs/facts" },
+        "answers": { "$ref": "#/$defs/answers" },
+        "thresholds": { "$ref": "#/$defs/thresholds" },
+        "expect": { "$ref": "#/$defs/expect" }
+      }
+    },
+    "expect": {
+      "description": "What the decision must be. Name at least one field. Only the named fields are compared.",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "matched_rule": { "description": "A rule id, or null for the default action.", "type": ["string", "null"] },
+        "action": { "type": "string" },
+        "target": { "type": "string" },
+        "reason": { "type": "string" },
+        "gate": { "type": "boolean" },
+        "from_facts": { "description": "True when the leading facts-only rules must decide without calling the server.", "type": "boolean" },
+        "error": { "description": "A substring of the error the case must raise, for example a missing fact.", "type": "string" }
+      }
+    },
+    "answers": {
+      "description": "Saved answers keyed by question id, in the normalized form, for example { \"type\": \"noul\", \"noul\": 0.8 }.",
+      "type": "object",
+      "propertyNames": { "pattern": "^\\S+$" },
+      "additionalProperties": {
+        "type": "object",
+        "minProperties": 1,
+        "properties": {
+          "type": { "type": "string" },
+          "choice": { "type": "string" },
+          "noul": { "type": ["number", "string", "boolean"] },
+          "score": { "type": ["number", "string"] },
+          "confidence": { "type": ["number", "string"] },
+          "probabilities": { "type": ["object", "array"] }
+        }
+      }
+    },
+    "thresholds": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+        "not": { "enum": ["__proto__", "prototype", "constructor"] }
+      },
+      "additionalProperties": { "type": "number" }
+    },
+    "facts": { "$ref": "#/$defs/factNode" },
+    "factScalar": { "type": ["string", "number", "boolean", "null"] },
+    "factNode": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$",
+        "not": { "enum": ["__proto__", "prototype", "constructor"] }
+      },
+      "additionalProperties": {
+        "anyOf": [
+          { "$ref": "#/$defs/factScalar" },
+          { "type": "array", "items": { "$ref": "#/$defs/factScalar" } },
+          { "$ref": "#/$defs/factNode" }
+        ]
+      }
+    }
+  }
+}
