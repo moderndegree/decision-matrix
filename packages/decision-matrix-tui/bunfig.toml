@@ -1,0 +1,3 @@
+[test]
+# Report this package only. Without this, the workspace packages' dist files count toward the total.
+coveragePathIgnorePatterns = ["../**", "test/**"]

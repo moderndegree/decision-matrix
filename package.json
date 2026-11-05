@@ -7,6 +7,7 @@
   "scripts": {
     "build": "turbo run build",
     "test": "turbo run test",
+    "coverage": "turbo run coverage",
     "typecheck": "turbo run typecheck",
     "check": "turbo run build test typecheck",
     "tui": "pnpm --filter decision-matrix-tui start"
