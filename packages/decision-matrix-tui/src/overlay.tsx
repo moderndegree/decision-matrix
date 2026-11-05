@@ -1,6 +1,6 @@
-import type { KeyEvent } from '@opentui/core';
+import type { KeyEvent, MouseEvent } from '@opentui/core';
 
-import { COLORS, visibleWindow, type Line } from './views';
+import { COLORS, CloseRow, visibleWindow, type Line } from './views';
 
 /**
  * The small windows every screen shares: a list to pick from, a line of text
@@ -31,11 +31,49 @@ export function multiPicker(title: string, options: Option[], chosen: number[], 
 	return { kind: 'picker', title, options, index: Math.max(0, chosen[0] ?? 0), multi: true, chosen: new Set(chosen), pick };
 }
 
+type Picker = Extract<Overlay, { kind: 'picker' }>;
+type SetOverlay = (next: Overlay | null) => void;
+
+function stepPicker(overlay: Picker, direction: -1 | 1): Picker {
+	const count = overlay.options.length;
+	if (count === 0) return overlay;
+	return { ...overlay, index: (overlay.index + (direction < 0 ? count - 1 : 1)) % count };
+}
+
+/** Chooses the option at `index`. A multi-select toggles it. A typed option asks for text. */
+function chooseOption(overlay: Picker, index: number, set: SetOverlay, invalid: (message: string) => void): void {
+	const option = overlay.options[index];
+	if (!option) return;
+	if (overlay.multi) {
+		const chosen = new Set(overlay.chosen);
+		if (chosen.has(index)) chosen.delete(index);
+		else chosen.add(index);
+		set({ ...overlay, index, chosen });
+		return;
+	}
+	if (option.typed) {
+		const typed = option.typed;
+		set({
+			kind: 'prompt',
+			title: typed.title,
+			initial: typed.initial,
+			submit: (text) => {
+				const parsed = typed.parse(text);
+				if (parsed === undefined) invalid('That is not a valid value.');
+				else overlay.pick([parsed]);
+			},
+		});
+		return;
+	}
+	set(null);
+	overlay.pick([option.value]);
+}
+
 /**
  * Handles a key while an overlay is open. A prompt's own input handles typing
  * and enter, so only escape reaches here for it.
  */
-export function overlayKey(key: KeyEvent, overlay: Overlay, set: (next: Overlay | null) => void, invalid: (message: string) => void): void {
+export function overlayKey(key: KeyEvent, overlay: Overlay, set: SetOverlay, invalid: (message: string) => void): void {
 	if (overlay.kind === 'help') return set(null);
 	if (key.name === 'escape') return set(null);
 	if (overlay.kind === 'confirm') {
@@ -46,50 +84,57 @@ export function overlayKey(key: KeyEvent, overlay: Overlay, set: (next: Overlay 
 		return;
 	}
 	if (overlay.kind !== 'picker') return;
-	const count = overlay.options.length;
 	if (key.name === 'up' || key.name === 'down') {
-		set({ ...overlay, index: (overlay.index + (key.name === 'up' ? count - 1 : 1)) % count });
+		set(stepPicker(overlay, key.name === 'up' ? -1 : 1));
 	} else if (key.name === 'space' && overlay.multi) {
-		const chosen = new Set(overlay.chosen);
-		if (chosen.has(overlay.index)) chosen.delete(overlay.index);
-		else chosen.add(overlay.index);
-		set({ ...overlay, chosen });
+		chooseOption(overlay, overlay.index, set, invalid);
 	} else if (key.name === 'return') {
-		const option = overlay.options[overlay.index]!;
-		if (option.typed) {
-			const typed = option.typed;
-			set({
-				kind: 'prompt',
-				title: typed.title,
-				initial: typed.initial,
-				submit: (text) => {
-					const parsed = typed.parse(text);
-					if (parsed === undefined) invalid('That is not a valid value.');
-					else overlay.pick([parsed]);
-				},
-			});
+		if (overlay.multi) {
+			set(null);
+			overlay.pick([...overlay.chosen].sort((a, b) => a - b).map((i) => overlay.options[i]!.value));
 			return;
 		}
-		set(null);
-		overlay.pick(overlay.multi ? [...overlay.chosen].sort((a, b) => a - b).map((i) => overlay.options[i]!.value) : [option.value]);
+		chooseOption(overlay, overlay.index, set, invalid);
 	}
 }
 
-export function OverlayBox(props: { overlay: Overlay; width: number; height: number; close: () => void }) {
+export function OverlayBox(props: { overlay: Overlay; width: number; height: number; set: SetOverlay; invalid: (message: string) => void }) {
 	const { overlay } = props;
 	const boxWidth = Math.min(props.width - 4, 100);
 	const lines = overlay.kind === 'help' || overlay.kind === 'confirm' ? overlay.lines : [];
 	const options = overlay.kind === 'picker' ? overlay.options : [];
-	const rows =
-		overlay.kind === 'picker'
-			? Math.min(options.length, props.height - 6)
-			: overlay.kind === 'prompt'
-				? 1
-				: Math.min(Math.max(1, lines.length), props.height - 6);
-	const [start, end] = overlay.kind === 'picker' ? visibleWindow(options.length, overlay.index, rows) : [0, rows];
+	const confirmActions = overlay.kind === 'confirm' ? 2 : 0;
+	const foot = confirmActions + 1;
+	const bodyLimit = Math.max(1, props.height - 6 - foot);
+	const body =
+		overlay.kind === 'picker' ? Math.min(Math.max(options.length, 1), bodyLimit) : overlay.kind === 'prompt' ? 1 : Math.min(Math.max(1, lines.length), bodyLimit);
+	const rows = body + foot;
+	const [start, end] = overlay.kind === 'picker' ? visibleWindow(options.length, overlay.index, body) : [0, body];
+
+	function onScroll(event: MouseEvent) {
+		if (overlay.kind !== 'picker') return;
+		const direction = event.scroll?.direction === 'up' ? -1 : event.scroll?.direction === 'down' ? 1 : 0;
+		if (!direction) return;
+		event.stopPropagation();
+		props.set(stepPicker(overlay, direction));
+	}
+
+	function close(event: MouseEvent) {
+		if (event.button !== 0) return;
+		event.stopPropagation();
+		props.set(null);
+	}
+
+	const dismiss = () => props.set(null);
+
 	return (
 		<box
 			title={` ${overlay.title} `}
+			onMouseDown={(event) => {
+				event.stopPropagation();
+				if (overlay.kind === 'help') props.set(null);
+			}}
+			onMouseScroll={onScroll}
 			style={{
 				position: 'absolute',
 				left: Math.floor((props.width - boxWidth) / 2),
@@ -104,6 +149,7 @@ export function OverlayBox(props: { overlay: Overlay; width: number; height: num
 				paddingRight: 1,
 			}}
 		>
+			<CloseRow onClose={dismiss} />
 			{overlay.kind === 'prompt' ? (
 				<input
 					// A new key for each prompt, so a prompt that follows another starts empty instead of
@@ -112,7 +158,7 @@ export function OverlayBox(props: { overlay: Overlay; width: number; height: num
 					focused
 					value={overlay.initial}
 					onSubmit={(text) => {
-						props.close();
+						props.set(null);
 						overlay.submit(typeof text === 'string' ? text : '');
 					}}
 				/>
@@ -121,17 +167,61 @@ export function OverlayBox(props: { overlay: Overlay; width: number; height: num
 					const at = start + i;
 					const mark = overlay.multi ? (overlay.chosen.has(at) ? '[x] ' : '[ ] ') : '';
 					return (
-						<text key={at} wrapMode="none" truncate fg={option.typed ? COLORS.dim : COLORS.text} bg={at === overlay.index ? COLORS.selected : undefined}>
+						<text
+							key={at}
+							wrapMode="none"
+							truncate
+							selectable={false}
+							style={{ width: '100%' }}
+							fg={option.typed ? COLORS.dim : COLORS.text}
+							bg={at === overlay.index ? COLORS.selected : undefined}
+							onMouseDown={(event) => {
+								if (event.button !== 0) return;
+								event.stopPropagation();
+								chooseOption(overlay, at, props.set, props.invalid);
+							}}
+						>
 							{`${mark}${option.label}`}
 						</text>
 					);
 				})
 			) : (
-				(lines.length > 0 ? lines : [{ text: 'Press y or n.' }]).slice(start, end).map((line, i) => (
-					<text key={i} wrapMode="none" truncate fg={COLORS[line.tone ?? 'text']}>
-						{line.text}
-					</text>
-				))
+				<>
+					{(lines.length > 0 ? lines : [{ text: overlay.kind === 'confirm' ? 'Click y or n, or [esc to close].' : '' }]).slice(start, end).map((line, i) => (
+						<text key={i} wrapMode="none" truncate selectable={false} fg={COLORS[line.tone ?? 'text']}>
+							{line.text}
+						</text>
+					))}
+					{overlay.kind === 'confirm' ? (
+						<>
+							<text
+								wrapMode="none"
+								truncate
+								selectable={false}
+								style={{ width: '100%' }}
+								fg={COLORS.open}
+								onMouseDown={(event) => {
+									if (event.button !== 0) return;
+									event.stopPropagation();
+									props.set(null);
+									overlay.yes();
+								}}
+							>
+								y  yes
+							</text>
+							<text
+								wrapMode="none"
+								truncate
+								selectable={false}
+								style={{ width: '100%' }}
+								fg={COLORS.dim}
+								onMouseDown={close}
+							>
+								n  no
+							</text>
+						</>
+					) : null}
+				</>
 			)}
 		</box>
 	);

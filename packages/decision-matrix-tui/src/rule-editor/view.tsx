@@ -8,7 +8,7 @@ import { diffPolicies } from 'decision-matrix-cli';
 import type { Derived, Workspace } from '../model';
 import { parseTyped, questionMap } from '../model';
 import { OverlayBox, overlayKey, type Option, type Overlay } from '../overlay';
-import { COLORS, visibleWindow, type Line, type Tone } from '../views';
+import { COLORS, CloseRow, Pane, type Line, type Tone } from '../views';
 import {
 	addCondition,
 	addGroup,
@@ -83,9 +83,44 @@ export function RuleEditor(props: RuleEditorProps) {
 	}
 
 	function move(direction: -1 | 1) {
-		let next = index + direction;
-		while (next >= 0 && next < rows.length && !selectable(rows[next]!)) next += direction;
-		if (next >= 0 && next < rows.length) setSelected(next);
+		setSelected((current) => {
+			let next = clampSelectable(rows, current) + direction;
+			while (next >= 0 && next < rows.length && !selectable(rows[next]!)) next += direction;
+			return next >= 0 && next < rows.length ? next : clampSelectable(rows, current);
+		});
+	}
+
+	function activate(entry: Row) {
+		if (entry.kind === 'field') {
+			const field = entry.field;
+			setOverlay({ kind: 'prompt', title: FIELD_LABELS[field], initial: entry.value, submit: (text) => commit(setField(draft, field, text)) });
+			return;
+		}
+		if (entry.kind === 'gate') return commit(toggleGate(draft));
+		if (entry.kind === 'operator') return pickValue(entry.path, entry.op, entry.value, entry.subject);
+		if (entry.kind === 'add-operator') return commit(addOperator(draft, entry.path, context));
+		if (entry.kind === 'add-condition') {
+			const groupPath = entry.path;
+			const mode = groupMode(draft, groupPath);
+			const length = (asObject(at(draft, groupPath))[mode] as unknown[]).length;
+			return commit(addCondition(draft, groupPath, context), findPath('predicate', [...groupPath, mode, length]));
+		}
+		if (entry.kind === 'group') return commit(toggleGroup(draft, entry.path));
+		if (entry.kind === 'predicate') return pickSubject(entry.path, entry.subject);
+	}
+
+	function pickRow(line: number | undefined) {
+		if (overlay || line === undefined || !selectable(rows[line]!)) return;
+		setMessage(null);
+		setSelected(line);
+	}
+
+	function openRow(line: number) {
+		const entry = rows[line];
+		if (overlay || !entry || !selectable(entry)) return;
+		setMessage(null);
+		setSelected(line);
+		activate(entry);
 	}
 
 	const findPath = (kind: Row['kind'], path: Path) => (list: Row[]) =>
@@ -246,27 +281,33 @@ export function RuleEditor(props: RuleEditorProps) {
 	useKeyboard(onKey);
 
 	const formWidth = Math.floor(props.width * 0.55);
-	const bodyHeight = props.height - 2;
+	const bodyHeight = props.height - 3;
 	const formLines = rows.map((entry, i) => rowLine(entry, context, i === index));
-	const [start, end] = visibleWindow(formLines.length, index, bodyHeight - 2);
 
 	return (
 		<box style={{ flexDirection: 'column', width: props.width, height: props.height, backgroundColor: '#1a1b26' }}>
+			<CloseRow onClose={cancel} />
 			<box style={{ flexDirection: 'row', height: bodyHeight }}>
-				<box title={` ${actionOnly ? 'Edit the default action' : `Edit rule ${String(draft.id ?? '')}`}${changed ? ' · changed' : ''} `} style={{ border: true, borderColor: COLORS.focus, width: formWidth, height: bodyHeight, flexDirection: 'column', paddingLeft: 1, paddingRight: 1 }}>
-					{formLines.slice(start, end).map((line, i) => (
-						<text key={start + i} wrapMode="none" truncate fg={COLORS[line.tone ?? 'text']} bg={line.selected ? COLORS.selected : undefined}>
-							{line.text}
-						</text>
-					))}
-				</box>
-				<box title=" Preview " style={{ border: true, borderColor: COLORS.border, width: props.width - formWidth, height: bodyHeight, flexDirection: 'column', paddingLeft: 1, paddingRight: 1 }}>
-					{preview.lines(context, draft, props.width - formWidth - 4).slice(0, bodyHeight - 2).map((line, i) => (
-						<text key={i} wrapMode="none" truncate fg={COLORS[line.tone ?? 'text']}>
-							{line.text}
-						</text>
-					))}
-				</box>
+				<Pane
+					title={` ${actionOnly ? 'Edit the default action' : `Edit rule ${String(draft.id ?? '')}`}${changed ? ' · changed' : ''} `}
+					focused
+					width={formWidth}
+					height={bodyHeight}
+					lines={formLines}
+					selectedIndex={index}
+					onPick={pickRow}
+					onWheel={(direction) => {
+						if (!overlay) move(direction);
+					}}
+					onOpen={openRow}
+				/>
+				<Pane
+					title=" Preview "
+					focused={false}
+					width={props.width - formWidth}
+					height={bodyHeight}
+					lines={preview.lines(context, draft, props.width - formWidth - 4)}
+				/>
 			</box>
 			{message ? (
 				<text wrapMode="word" style={{ height: 2 }} fg={COLORS[message.tone]}>
@@ -278,11 +319,11 @@ export function RuleEditor(props: RuleEditorProps) {
 						{` ${ROW_HINTS[row.kind]}`}
 					</text>
 					<text wrapMode="none" truncate fg={COLORS.dim}>
-						{' ↑↓ move · ctrl+s apply to the policy · esc cancel · the file is saved from the main screen'}
+						{' click · wheel · click twice edits · ctrl+s apply · save the file from the main screen'}
 					</text>
 				</>
 			)}
-			{overlay ? <OverlayBox overlay={overlay} width={props.width} height={props.height} close={() => setOverlay(null)} /> : null}
+			{overlay ? <OverlayBox overlay={overlay} width={props.width} height={props.height} set={setOverlay} invalid={(text) => setMessage({ text, tone: 'hold' })} /> : null}
 		</box>
 	);
 }

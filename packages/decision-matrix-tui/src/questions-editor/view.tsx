@@ -25,7 +25,7 @@ import {
 	setQuestionType,
 	type QuestionType,
 } from '../questions-model';
-import { COLORS, Pane, type Line, type Tone } from '../views';
+import { COLORS, CloseRow, Pane, type Line, type Tone } from '../views';
 
 type Row =
 	| { kind: 'id' | 'type' | 'instructions' }
@@ -170,6 +170,80 @@ export function QuestionsEditor(props: QuestionsEditorProps) {
 		}
 	}
 
+	function ready(): boolean {
+		return !overlay;
+	}
+
+	function pickList(index: number | undefined) {
+		if (!ready()) return;
+		setMessage(null);
+		setFocus('list');
+		if (index !== undefined) setListIndex(Math.min(Math.max(0, index), ids.length));
+	}
+
+	function wheelList(direction: -1 | 1) {
+		if (!ready()) return;
+		setMessage(null);
+		setFocus('list');
+		setListIndex((current) => Math.min(Math.max(0, Math.min(current, ids.length) + direction), ids.length));
+	}
+
+	function openList(index: number) {
+		if (!ready()) return;
+		pickList(index);
+		const questionId = ids[index];
+		if (!questionId) return newQuestion();
+		setFocus('detail');
+	}
+
+	function moveDetail(direction: -1 | 1) {
+		if (!ready()) return;
+		setMessage(null);
+		setFocus('detail');
+		setDetailIndex((current) => {
+			let next = clampRow(rows, current);
+			const step = direction < 0 ? -1 : 1;
+			let candidate = next + step;
+			while (candidate >= 0 && candidate < rows.length && rows[candidate]!.kind === 'section') candidate += step;
+			if (candidate >= 0 && candidate < rows.length) next = candidate;
+			return next;
+		});
+	}
+
+	function pickDetail(index: number | undefined) {
+		if (!ready()) return;
+		setMessage(null);
+		setFocus('detail');
+		if (index === undefined || !rows[index] || rows[index]!.kind === 'section') return;
+		setDetailIndex(index);
+	}
+
+	function openDetail(index: number) {
+		if (!ready() || !id || !entry) return;
+		const target = rows[index];
+		if (!target || target.kind === 'section') return;
+		pickDetail(index);
+		switch (target.kind) {
+			case 'id':
+				return prompt(`Rename ${id} to`, id, (text) => run(renameQuestion(workspace, id, text.trim()), 'Renamed. Rules and cases follow.'));
+			case 'type': {
+				const at = QUESTION_TYPES.indexOf(entry.type as QuestionType);
+				const next = QUESTION_TYPES[(at + 1) % QUESTION_TYPES.length]!;
+				return run(setQuestionType(workspace, id, next), `${id} is now a ${next} question. Check the lint for rules that no longer fit.`);
+			}
+			case 'instructions':
+				return prompt('What the model is asked', String(entry.instructions ?? ''), (text) => run(setInstructions(workspace, id, text)));
+			case 'label':
+				return prompt(`Describe ${target.label} (empty for none)`, target.description ?? '', (text) => run(setLabelDescription(workspace, id, target.label, text)));
+			case 'level':
+				return prompt(`Level ${target.index}`, target.text, (text) => run(setLevel(workspace, id, target.index, text)));
+			case 'add-label':
+				return prompt('New label', '', (text) => run(addLabel(workspace, id, text.trim()), `Added ${text.trim()}.`));
+			case 'add-level':
+				return prompt('New highest level', '', (text) => run(addLevel(workspace, id, text), 'Added a level.'));
+		}
+	}
+
 	function onKey(key: KeyEvent) {
 		if (overlay) return overlayKey(key, overlay, setOverlay, (text) => setMessage({ text, tone: 'hold' }));
 		setMessage(null);
@@ -185,7 +259,7 @@ export function QuestionsEditor(props: QuestionsEditorProps) {
 	useKeyboard(onKey);
 
 	const findings = derived.findings.filter((finding) => LINT_CODES.has(finding.code));
-	const bodyHeight = props.height - 2 - Math.min(6, findings.length + (findings.length > 0 ? 2 : 0));
+	const bodyHeight = props.height - 3 - Math.min(6, findings.length + (findings.length > 0 ? 2 : 0));
 	const listLines: Line[] = ids.map((questionId, i) => {
 		const users = questionUsers(workspace, questionId).length;
 		return {
@@ -200,9 +274,30 @@ export function QuestionsEditor(props: QuestionsEditorProps) {
 
 	return (
 		<box style={{ flexDirection: 'column', width: props.width, height: props.height, backgroundColor: '#1a1b26' }}>
+			<CloseRow onClose={props.onClose} />
 			<box style={{ flexDirection: 'row', height: bodyHeight }}>
-				<Pane title={` Questions · ${workspace.questionsPath ?? ''} `} focused={focus === 'list'} width="40%" height={bodyHeight} lines={listLines} selectedIndex={selectedIndex} />
-				<Pane title={` ${id ?? 'Question'} `} focused={focus === 'detail'} width="60%" height={bodyHeight} lines={detailLines} selectedIndex={rowIndex} />
+				<Pane
+					title={` Questions · ${workspace.questionsPath ?? ''} `}
+					focused={focus === 'list'}
+					width="40%"
+					height={bodyHeight}
+					lines={listLines}
+					selectedIndex={selectedIndex}
+					onPick={pickList}
+					onWheel={wheelList}
+					onOpen={openList}
+				/>
+				<Pane
+					title={` ${id ?? 'Question'} `}
+					focused={focus === 'detail'}
+					width="60%"
+					height={bodyHeight}
+					lines={detailLines}
+					selectedIndex={rowIndex}
+					onPick={pickDetail}
+					onWheel={moveDetail}
+					onOpen={openDetail}
+				/>
 			</box>
 			{findings.length > 0 ? (
 				<box title={` Lint · ${findings.length} `} style={{ border: true, borderColor: COLORS.border, height: Math.min(6, findings.length + 2), flexDirection: 'column', paddingLeft: 1 }}>
@@ -223,11 +318,11 @@ export function QuestionsEditor(props: QuestionsEditorProps) {
 						{` ${hint}`}
 					</text>
 					<text wrapMode="none" truncate fg={COLORS.dim}>
-						{' tab list/detail · esc back · ctrl+s save · edits apply at once and carry into rules and cases'}
+						{' click · wheel · click twice edits · tab list/detail · ctrl+s save'}
 					</text>
 				</>
 			)}
-			{overlay ? <OverlayBox overlay={overlay} width={props.width} height={props.height} close={() => setOverlay(null)} /> : null}
+			{overlay ? <OverlayBox overlay={overlay} width={props.width} height={props.height} set={setOverlay} invalid={(text) => setMessage({ text, tone: 'hold' })} /> : null}
 		</box>
 	);
 }

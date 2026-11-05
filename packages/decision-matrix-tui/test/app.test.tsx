@@ -2,6 +2,13 @@ import { describe, expect, test } from 'bun:test';
 
 import { ciWorkspace, fakeIO, renderApp } from './helpers';
 
+function cell(frame: string, needle: string): { x: number; y: number } {
+	const rows = frame.split('\n');
+	const y = rows.findIndex((row) => row.includes(needle));
+	if (y < 0) throw new Error(`not on screen: ${needle}`);
+	return { x: rows[y]!.indexOf(needle), y };
+}
+
 async function open(edits: Parameters<typeof fakeIO>[0] = []) {
 	const fake = fakeIO(edits);
 	const app = await renderApp(ciWorkspace(), fake.io);
@@ -132,6 +139,93 @@ describe('decision-matrix-tui', () => {
 		await press(() => keys.pressKey('x'));
 		await press(() => keys.pressKey('q'));
 		expect(quitCalled()).toBe(true);
+		setup.renderer.destroy();
+	});
+
+	test('the rule editor shows esc close, and clicking it leaves the editor', async () => {
+		const { press, keys, setup } = await open();
+		const mouse = setup.mockMouse;
+		let screen = await press(() => keys.pressKey('e'));
+		expect(screen).toContain('Edit rule hold-ci-config');
+		const close = cell(screen, '[esc to close]');
+		expect(close.y).toBe(0);
+		expect(close.x).toBeGreaterThan(100);
+		screen = await press(() => mouse.click(close.x, close.y));
+		expect(screen).toContain('Rules · ci-change.rules.json');
+		expect(screen).not.toContain('Edit rule');
+
+		screen = await press(() => keys.pressKey('q', { shift: true }));
+		expect(screen).toContain('Questions · ci-change.questions.json');
+		screen = await press(() => mouse.click(cell(screen, '[esc to close]').x, cell(screen, '[esc to close]').y));
+		expect(screen).toContain('Rules · ci-change.rules.json');
+		expect(screen).not.toContain('Questions ·');
+		setup.renderer.destroy();
+	});
+
+	test('esc close dismisses a window without accepting it', async () => {
+		const { press, keys, quitCalled, setup } = await open();
+		const mouse = setup.mockMouse;
+		let screen = await press(() => keys.pressKey('?'));
+		expect(screen).toContain('[esc to close]');
+		screen = await press(() => mouse.click(cell(screen, '[esc to close]').x, cell(screen, '[esc to close]').y));
+		expect(screen).toContain('Rules · ci-change.rules.json');
+		expect(screen).not.toContain('Keys · any key closes');
+
+		await press(() => keys.pressKey('g'));
+		screen = await press(() => keys.pressKey('q'));
+		screen = await press(() => mouse.click(cell(screen, '[esc to close]').x, cell(screen, '[esc to close]').y));
+		expect(screen).not.toContain('Quit without saving');
+		expect(quitCalled()).toBe(false);
+		setup.renderer.destroy();
+	});
+
+	test('the mouse selects a row, wheels to the next one, and a second click edits it', async () => {
+		const { frame, press, setup } = await open();
+		const mouse = setup.mockMouse;
+		let screen = await frame();
+		const rule = cell(screen, '10 ○ pass-small-change');
+		screen = await press(() => mouse.click(rule.x, rule.y));
+		expect(screen).toContain('─ pass-small-change ');
+		expect(screen).toContain('→ pass · review · opens the gate');
+
+		const first = cell(screen, '1 ● hold-ci-config');
+		screen = await press(() => mouse.click(first.x, first.y));
+		expect(screen).toContain('─ hold-ci-config ');
+		expect(screen).toContain('✓ fact touches_ci eq true');
+		screen = await press(() => mouse.scroll(first.x, first.y, 'down'));
+		expect(screen).toContain('─ hold-package-scripts ');
+
+		screen = await press(() => mouse.doubleClick(first.x, first.y));
+		expect(screen).toContain('Edit rule hold-ci-config');
+		setup.renderer.destroy();
+	});
+
+	test('a click chooses from a list, and y yes confirms', async () => {
+		const { press, keys, saved, quitCalled, setup } = await open();
+		const mouse = setup.mockMouse;
+		await press(() => keys.pressKey('g'));
+		let screen = await press(() => keys.pressKey('q'));
+		expect(screen).toContain('Quit without saving? y/n');
+		const no = cell(screen, 'n  no');
+		screen = await press(() => mouse.click(no.x, no.y));
+		expect(screen).not.toContain('Quit without saving');
+		expect(quitCalled()).toBe(false);
+
+		screen = await press(() => keys.pressKey('q'));
+		const yes = cell(screen, 'y  yes');
+		screen = await press(() => mouse.click(yes.x, yes.y));
+		expect(quitCalled()).toBe(true);
+
+		screen = await press(() => keys.pressKey('q', { shift: true }));
+		const risk = cell(screen, 'risk  score');
+		screen = await press(() => mouse.click(risk.x, risk.y));
+		expect(screen).toContain('type          score');
+		expect(screen).toContain('Levels, lowest (0) first');
+
+		const level = cell(screen, 'No security impact');
+		screen = await press(() => mouse.doubleClick(level.x, level.y));
+		expect(screen).toContain('Level 0');
+		expect(saved).toEqual([]);
 		setup.renderer.destroy();
 	});
 });

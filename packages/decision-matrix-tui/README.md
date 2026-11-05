@@ -57,6 +57,12 @@ pnpm tui --rules packages/decision-matrix-cli/examples/ci-change.rules.json \
 | Cases | `↑↓` select · `n` new · `a` copy · `r` rename · `e` expectations · `u` accept the current decision · `x` delete |
 | Case values | `↑↓` select · `←→` or `space` change · `enter` type a value (JSON, or plain text) · `n` add a fact or answer · `x` remove |
 
+## Mouse
+
+Click a row to select it and focus that pane. The wheel moves the selection in the pane under the pointer. Click a row twice to do what `enter` does: edit a rule, type a threshold or a case value, or open a case's expectations. The rule form and the questions screen work the same way.
+
+In a list of choices, click the one you want. A yes/no question has `y yes` and `n no` rows. The rule editor, the questions screen, and every window have an `[esc to close]` control in the upper right. It does what the escape key does. Hold Shift and drag when you want the terminal's own text selection.
+
 **Strict.** `S` turns `open_gate_requires_facts` on, which fails with the reason if a rule or the default breaks it. Turning it off asks first, and the diff counts it as a loosening.
 
 **Thresholds.** `r` renames a threshold everywhere: the thresholds block, every condition that names it (as `"name"`, `{{thresholds.name}}`, or `{"threshold": "name"}`), every `{{thresholds.name}}` in a target or reason, and every case override. `x` deletes a threshold only when no rule uses it, and says which rules do.

@@ -140,6 +140,25 @@ export function App(props: { initial: Workspace; io: AppIO }) {
 		setSelection((current) => ({ ...current, [pane]: clamp(index, count) }));
 	}
 
+	/** Mouse events reach the panes underneath an overlay. Ignore them until it closes. */
+	function pointer(): boolean {
+		return !busy && !overlay;
+	}
+
+	function pick(pane: Focus, index: number | undefined, count: number) {
+		if (!pointer()) return;
+		setStatus(null);
+		setFocus(pane);
+		if (index !== undefined) select(pane, index, count);
+	}
+
+	function wheel(pane: Focus, direction: -1 | 1, count: number) {
+		if (!pointer()) return;
+		setStatus(null);
+		setFocus(pane);
+		setSelection((current) => ({ ...current, [pane]: clamp(current[pane] + direction, count) }));
+	}
+
 	function prompt(title: string, initial: string, submit: (text: string) => void) {
 		setOverlay({ kind: 'prompt', title, initial, submit });
 	}
@@ -461,6 +480,14 @@ export function App(props: { initial: Workspace; io: AppIO }) {
 					height={topHeight}
 					lines={ruleLines(rules, derived.ruleset.default_action, derived.findings, covered, ruleRow, Boolean(workspace.cases))}
 					selectedIndex={ruleRow}
+					onPick={(index) => pick('rules', index, rules.length + 1)}
+					onWheel={(direction) => wheel('rules', direction, rules.length + 1)}
+					onOpen={(index) => {
+						if (!pointer() || index < 0 || index > rules.length) return;
+						setFocus('rules');
+						select('rules', index, rules.length + 1);
+						setEditing({ target: index === rules.length ? 'default' : index, added: false, before: workspace });
+					}}
 				/>
 				<Pane
 					title={` ${onDefault ? 'default action' : (rules[ruleRow]?.id ?? 'Rule')} `}
@@ -472,10 +499,26 @@ export function App(props: { initial: Workspace; io: AppIO }) {
 							? defaultLines(derived.ruleset.default_action, derived.findings, strict)
 							: detailLines(rules[ruleRow], derived.ruleset.thresholds, ruleTrace?.when, ruleTrace?.error, derived.findings, selectedCase?.name)
 					}
+					onPick={() => pick('rules', undefined, rules.length + 1)}
 				/>
 			</box>
 			<box style={{ flexDirection: 'row', height: bottomHeight }}>
-				<Pane title=" Thresholds " focused={focus === 'thresholds'} width="22%" height={bottomHeight} lines={thresholdLines(derived.ruleset.thresholds, thresholdIndex)} selectedIndex={thresholdIndex} />
+				<Pane
+					title=" Thresholds "
+					focused={focus === 'thresholds'}
+					width="22%"
+					height={bottomHeight}
+					lines={thresholdLines(derived.ruleset.thresholds, thresholdIndex)}
+					selectedIndex={thresholdIndex}
+					onPick={(index) => pick('thresholds', index, thresholdNames.length)}
+					onWheel={(direction) => wheel('thresholds', direction, thresholdNames.length)}
+					onOpen={(index) => {
+						const name = thresholdNames[index];
+						if (!pointer() || !name) return;
+						pick('thresholds', index, thresholdNames.length);
+						prompt(`${name} =`, String(derived.ruleset.thresholds[name]), (text) => apply(setThreshold(workspace, name, Number(text)), `${name} set.`));
+					}}
+				/>
 				<Pane
 					title={results ? ` Cases ${passed}/${results.length} ` : ' Cases '}
 					focused={focus === 'cases'}
@@ -483,6 +526,16 @@ export function App(props: { initial: Workspace; io: AppIO }) {
 					height={bottomHeight}
 					lines={caseLines(results, caseRow, derived.casesError, Boolean(workspace.cases))}
 					selectedIndex={caseRow}
+					onPick={(index) => pick('cases', index, caseCount + 1)}
+					onWheel={(direction) => wheel('cases', direction, caseCount + 1)}
+					onOpen={(index) => {
+						if (!pointer()) return;
+						pick('cases', index, caseCount + 1);
+						if (!workspace.cases) return setStatus({ text: 'No cases file is open. Start with --cases <file>. A new path creates the file.', tone: 'text' });
+						if (index === 0) return setStatus({ text: 'The defaults have no name or expectation. Edit their values in the next pane.', tone: 'text' });
+						if (index > caseCount) return;
+						editExpectations(workspace, index - 1);
+					}}
 				/>
 				<Pane
 					title={` ${scope.kind === 'defaults' ? 'defaults' : (selectedCase?.name ?? 'Case')} `}
@@ -491,6 +544,17 @@ export function App(props: { initial: Workspace; io: AppIO }) {
 					height={bottomHeight}
 					lines={inspectorLines(header, values, valueIndex)}
 					selectedIndex={valueIndex + header.length}
+					onPick={(index) => {
+						const valueAt = index === undefined ? undefined : index - header.length;
+						pick('values', valueAt !== undefined && valueAt >= 0 && valueAt < values.length ? valueAt : undefined, values.length);
+					}}
+					onWheel={(direction) => wheel('values', direction, values.length)}
+					onOpen={(index) => {
+						const value = values[index - header.length];
+						if (!pointer() || !value) return;
+						pick('values', index - header.length, values.length);
+						prompt(`${value.path} =`, JSON.stringify(value.value), (text) => apply(setScopeValue(workspace, derived, scope, value, parseTyped(text))));
+					}}
 				/>
 			</box>
 			{status ? (
@@ -504,17 +568,20 @@ export function App(props: { initial: Workspace; io: AppIO }) {
 						{` ${summary}`}
 					</text>
 					<text wrapMode="none" truncate fg={COLORS.dim}>
-						{` ${HINTS[focus]} │ tab · Q questions · S strict · ^s save · ? keys · q quit`}
+						{` ${HINTS[focus]} │ click · wheel · tab · Q · S strict · ^s save · ? · q`}
 					</text>
 				</>
 			)}
-			{overlay ? <OverlayBox overlay={overlay} width={width} height={height} close={() => setOverlay(null)} /> : null}
+			{overlay ? <OverlayBox overlay={overlay} width={width} height={height} set={setOverlay} invalid={(text) => setStatus({ text, tone: 'hold' })} /> : null}
 		</box>
 	);
 }
 
 const HELP: Line[] = [
 	{ text: 'Panes: Rules, Thresholds, Cases, and the selected case. Tab and shift+tab move between them.', tone: 'accent' },
+	{ text: 'Mouse: click a row to select it and focus its pane. The wheel moves through the pane under the pointer.' },
+	{ text: 'Click a row twice to do what enter does: edit a rule, type a value, or open expectations.' },
+	{ text: 'The rule editor, the questions screen, and every window have [esc to close] in the upper right. It does what escape does.' },
 	{ text: 'Every edit re-runs the linter and every case at once. The rule pane checks the selected case.' },
 	{ text: '' },
 	{ text: 'Rules     ↑↓ select (the last row is the default action)   shift+↑↓ move   g gate   e edit   E edit as JSON   n new   x delete' },

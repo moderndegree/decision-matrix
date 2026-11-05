@@ -1,3 +1,6 @@
+import type { MouseEvent } from '@opentui/core';
+import { useRef, useState } from 'react';
+
 import type { Condition, LintFinding, Rule, TraceNode } from 'decision-matrix-rules';
 import { flatWhen, referencedQuestions } from 'decision-matrix-rules';
 import type { CaseResult } from 'decision-matrix-cli';
@@ -14,6 +17,7 @@ export const COLORS = {
 	focus: '#7dcfff',
 	border: '#3b4261',
 	selected: '#283457',
+	hover: '#24283b',
 } as const;
 
 export type Tone = 'text' | 'dim' | 'accent' | 'hold' | 'open' | 'warn';
@@ -32,13 +36,83 @@ export function visibleWindow(count: number, selected: number, rows: number): [n
 	return [start, start + rows];
 }
 
-export function Pane(props: { title: string; focused: boolean; width: number | `${number}%`; height: number; lines: Line[]; selectedIndex?: number }) {
+const DOUBLE_CLICK_MS = 400;
+
+/** A clickable control in the upper right that dismisses the screen or window. */
+export function CloseRow(props: { onClose: () => void }) {
+	return (
+		<box style={{ height: 1, width: '100%', flexDirection: 'row', justifyContent: 'flex-end', paddingRight: 1 }}>
+			<text
+				wrapMode="none"
+				truncate
+				selectable={false}
+				style={{ width: 14, height: 1 }}
+				fg={COLORS.focus}
+				onMouseDown={(event) => {
+					if (event.button !== 0) return;
+					event.stopPropagation();
+					props.onClose();
+				}}
+			>
+				[esc to close]
+			</text>
+		</box>
+	);
+}
+
+export function Pane(props: {
+	title: string;
+	focused: boolean;
+	width: number | `${number}%`;
+	height: number;
+	lines: Line[];
+	selectedIndex?: number;
+	/** A click on a row passes that row's index. A click on the pane chrome passes undefined. */
+	onPick?: (index: number | undefined) => void;
+	/** A second click on the same row, within a short gap. */
+	onOpen?: (index: number) => void;
+	/** The wheel over this pane. Negative is up. */
+	onWheel?: (direction: -1 | 1) => void;
+}) {
 	const rows = Math.max(0, props.height - 2);
-	const [start, end] = props.selectedIndex === undefined ? [0, Math.min(rows, props.lines.length)] : visibleWindow(props.lines.length, props.selectedIndex, rows);
-	const shown = props.lines.slice(start, end);
+	const [scroll, setScroll] = useState(0);
+	const [hover, setHover] = useState<number | null>(null);
+	const lastClick = useRef<{ index: number; at: number } | null>(null);
+	const followsSelection = props.selectedIndex !== undefined;
+	const maxScroll = Math.max(0, props.lines.length - rows);
+	const [windowStart, windowEnd] = followsSelection ? visibleWindow(props.lines.length, props.selectedIndex!, rows) : [Math.min(scroll, maxScroll), Math.min(scroll, maxScroll) + rows];
+	const shown = props.lines.slice(windowStart, windowEnd);
+
+	function wheelDirection(event: MouseEvent): -1 | 1 | 0 {
+		if (event.scroll?.direction === 'up') return -1;
+		if (event.scroll?.direction === 'down') return 1;
+		return 0;
+	}
+
+	function onScroll(event: MouseEvent) {
+		const direction = wheelDirection(event);
+		if (!direction) return;
+		event.stopPropagation();
+		if (props.onWheel) props.onWheel(direction);
+		else if (!followsSelection) setScroll((current) => Math.min(maxScroll, Math.max(0, current + direction)));
+	}
+
+	function onPress(index: number | undefined, event: MouseEvent) {
+		if (event.button !== 0) return;
+		event.stopPropagation();
+		const now = Date.now();
+		const previous = lastClick.current;
+		const again = index !== undefined && previous?.index === index && now - previous.at <= DOUBLE_CLICK_MS;
+		lastClick.current = index === undefined ? null : { index, at: now };
+		if (again) props.onOpen?.(index);
+		else props.onPick?.(index);
+	}
+
 	return (
 		<box
 			title={props.title}
+			onMouseDown={(event) => onPress(undefined, event)}
+			onMouseScroll={onScroll}
 			style={{
 				border: true,
 				borderColor: props.focused ? COLORS.focus : COLORS.border,
@@ -49,17 +123,25 @@ export function Pane(props: { title: string; focused: boolean; width: number | `
 				paddingRight: 1,
 			}}
 		>
-			{shown.map((line, index) => (
-				<text
-					key={start + index}
-					wrapMode="none"
-					truncate
-					fg={COLORS[line.tone ?? 'text']}
-					bg={line.selected ? COLORS.selected : undefined}
-				>
-					{line.text}
-				</text>
-			))}
+			{shown.map((line, index) => {
+				const at = windowStart + index;
+				return (
+					<text
+						key={at}
+						wrapMode="none"
+						truncate
+						selectable={false}
+						style={{ width: '100%' }}
+						fg={COLORS[line.tone ?? 'text']}
+						bg={line.selected ? COLORS.selected : hover === at ? COLORS.hover : undefined}
+						onMouseDown={(event) => onPress(at, event)}
+						onMouseOver={() => setHover(at)}
+						onMouseOut={() => setHover((current) => (current === at ? null : current))}
+					>
+						{line.text}
+					</text>
+				);
+			})}
 		</box>
 	);
 }
