@@ -83,6 +83,15 @@ const CORPUS: Array<[string, unknown, boolean]> = [
 	['a rule id with a space', { ...base, rules: [{ ...base.rules[0], id: 'a b' }] }, false],
 	['a rule without an action', { ...base, rules: [{ id: 'r', when: base.rules[0]!.when }] }, false],
 	['open_gate_requires_facts that is a string', { ...base, open_gate_requires_facts: 'yes' }, false],
+	['owner and ticket', { ...base, owner: 'decision-matrix', ticket: 'ci-change' }, true],
+	['an owner of only spaces', { ...base, owner: '   ' }, false],
+	['an empty fact schema', { ...base, fact_schema: {} }, true],
+	['a fact schema entry', { ...base, fact_schema: { touches_ci: { type: 'boolean', required: true } } }, true],
+	['a fact schema type the engine does not have', { ...base, fact_schema: { touches_ci: { type: 'date', required: true } } }, false],
+	['an agreement', { ...base, agreements: [{ question: 'q', fact: 'touches_ci', relation: 'inverse' }] }, true],
+	['an agreement relation the engine does not have', { ...base, agreements: [{ question: 'q', fact: 'touches_ci', relation: 'gt' }] }, false],
+	['an instant operand', withWhen({ fact: 'seen_at', gte: '2024-01-02T03:04:05Z' }), true],
+	['a date-only operand', withWhen({ fact: 'seen_at', gte: '2024-01-02' }), false],
 ];
 
 /** Valid by shape, rejected by checks JSON Schema cannot make. Documented in the schema's $comment. */

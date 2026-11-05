@@ -203,6 +203,7 @@ All requests go through this credential. The credential's `authenticate` hook ad
 | Rules | yes | Version 1 ruleset. Expressions are supported, so an earlier node can supply the JSON. The node ships with the generic triage ruleset filled in. |
 | Facts | no | JSON object of values the workflow verified itself (directory, IAM, git). Fact predicates in the rules read it. It is not sent to the server. See [Facts](#facts). |
 | Thresholds | no | Fixed collection of name/value rows. A row replaces the same name in `rules.thresholds` for that item. |
+| Rule Rows | no | Fixed collection of flat rules. Empty keeps the Rules JSON. A non-empty collection replaces the `rules` array and keeps version, thresholds, the default action, owner, ticket, fact schema, and agreements. Each row is one `all` or `any` of unary cells. Nested groups stay in the Rules JSON. |
 | Options → Timeout (ms) | no | HTTP timeout. Default 60000. |
 | Options → Include Full Answers | no | Copy the server `answers` map onto the item. Default true. |
 | Options → Fail on No Matching Rule | no | Throw instead of returning `default_action`. Default false. |
@@ -397,8 +398,8 @@ A threshold name wins over a numeric parse. Node **Thresholds** replace ruleset 
 Output `confidence` is the minimum best-effort confidence of every question the matched rule references.
 
 - Choice and score use the server's `confidence` when it is present.
-- If a choice omits `confidence`, the probability of the selected option is used, then the maximum probability.
-- If a score omits `confidence`, the maximum level probability is used.
+- If a choice omits `confidence`, the probability of the selected label is used. A missing label does not fall back to the maximum probability.
+- If a score omits `confidence`, the probability of the selected level is used. The level index itself is not limited to 0–1. A missing level does not fall back to the maximum probability.
 - Noul contributes decisiveness, `abs(noul - 0.5) * 2`. A probability of 0.5 contributes 0. A probability of 0 or 1 contributes 1. That measures uncertainty, not "how yes" the answer is.
 - A referenced answer with none of those signals contributes 0.
 - Facts do not lower confidence. A rule that references only facts has confidence 1.
@@ -705,7 +706,7 @@ Other routine audits use the same shape: facts decide the clear cases, and the m
 
 ### CI with GitHub Actions
 
-The command, not the node, belongs in CI. A second workflow runs `decision-matrix check --strict` and `decision-matrix test --require-coverage` on every policy change, so a PR that weakens the policy fails a test case and shows the reviewer which decision changed. See [`packages/decision-matrix-cli/README.md`](packages/decision-matrix-cli/README.md#github-actions) for a required check that collects facts from git and holds CI, script, and new-dependency changes before any model call.
+The command, not the node, belongs in CI. A second workflow runs `decision-matrix check` and `decision-matrix test --require-coverage --require-fact-errors` on every policy change, so a PR that weakens the policy fails a test case and shows the reviewer which decision changed. `check` fails on errors. `--strict` also fails warnings, including the overlap warnings on the starter CI policy. See [`packages/decision-matrix-cli/README.md`](packages/decision-matrix-cli/README.md#github-actions) for a required check that collects facts from git and holds CI, script, and new-dependency changes before any model call.
 
 The generic triage rules are the default already loaded on a new Decision Matrix node. Pair them with **Question Set → Generic Triage** and switch on `route` versus `escalate`. `target` for `route` is the chosen category (`billing`, `technical`, `account`, or `other`).
 
@@ -727,7 +728,7 @@ A step has one matcher and one answer. `word` is a whole word or phrase, ASCII c
 
 A script reads the state. It is not a fact. Use it for a queue, a severity, or a commit tag. For a security decision, keep the gate on facts. Attack triage, CI, and access review do not ship with scripts.
 
-When a script leaves a question open, the node sends only those questions. Script answers and server answers are merged, and the script wins on a question it answered.
+When a script leaves a question open, the node sends only those questions. Script answers and server answers are merged, and the script wins on a question it answered. When `open_gate_requires_facts` is set, a question that an opening rule reads is still sent, and the server answer wins on that question. A script may still be the only answer for a hold.
 
 ## Local and hosted servers
 
@@ -779,7 +780,7 @@ The n8n package is the host. The other workspace packages are the shareable part
 
 | Package | What it is |
 | --- | --- |
-| `decision-matrix-rules` | First-match rules engine. `evaluateRules(ruleset, answers, overrides)` returns `{ action, target, reason, gate, matched_rule, confidence }`. No I/O. |
+| `decision-matrix-rules` | First-match rules engine. `evaluateRules(ruleset, answers, overrides)` returns `{ action, target, reason, gate, matched_rule, confidence, margin, contributions }`. `decisionReceipt` adds the ruleset hash and the paths and question ids that were read, without the values. No I/O. |
 | `decision-matrix-systemone` | `POST /v1/systemone` client, plus local scripts (`validateScripts`, `runScripts`) that return the same answer view. |
 | `decision-matrix-cli` | `decision-matrix decide` reads one event, calls the server (or a saved answers file), and prints the decision. `decision-matrix test` runs policy test cases with no server. `decision-matrix check` lints a ruleset. `decision-matrix diff` explains what a ruleset change does to the policy. |
 | `decision-matrix-tui` | A terminal editor and test bench for a ruleset and its cases. Runs on Bun. |

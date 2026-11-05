@@ -6,10 +6,13 @@
 /** Pairs with GENERIC_TRIAGE_QUESTIONS. This is the node's default ruleset. */
 export const GENERIC_TRIAGE_RULES = {
 	version: 1 as const,
+	owner: 'decision-matrix',
+	ticket: 'generic',
 	default_action: {
 		type: 'escalate',
 		target: 'human',
 		reason: 'No matching rule',
+		gate: true,
 	},
 	thresholds: {
 		high_confidence: 0.85,
@@ -51,10 +54,13 @@ export const GENERIC_TRIAGE_RULES = {
 /** Pairs with SDLC_QUESTIONS. */
 export const SDLC_RULES = {
 	version: 1 as const,
+	owner: 'decision-matrix',
+	ticket: 'sdlc',
 	default_action: {
 		type: 'escalate',
 		target: 'human',
 		reason: 'No matching rule',
+		gate: true,
 	},
 	thresholds: {
 		high_confidence: 0.85,
@@ -106,10 +112,13 @@ export const SDLC_RULES = {
 /** Pairs with SUPPORT_OPS_QUESTIONS. */
 export const SUPPORT_OPS_RULES = {
 	version: 1 as const,
+	owner: 'decision-matrix',
+	ticket: 'support',
 	default_action: {
 		type: 'escalate',
 		target: 'human',
 		reason: 'No matching rule',
+		gate: true,
 	},
 	thresholds: {
 		page_threshold: 0.8,
@@ -161,6 +170,8 @@ export const SUPPORT_OPS_RULES = {
  */
 export const ATTACK_TRIAGE_RULES = {
 	version: 1 as const,
+	owner: 'decision-matrix',
+	ticket: 'attack-triage',
 	default_action: {
 		type: 'escalate',
 		target: 'human',
@@ -245,6 +256,9 @@ export const ATTACK_TRIAGE_RULES = {
 export const CI_CHANGE_RULES = {
 	version: 1 as const,
 	open_gate_requires_facts: true,
+	owner: 'decision-matrix',
+	ticket: 'ci-change',
+	agreements: [{ question: 'changes_runtime_behavior', fact: 'docs_only', relation: 'inverse' as const }],
 	default_action: {
 		type: 'hold',
 		target: 'human',
@@ -417,6 +431,8 @@ export const CI_CHANGE_RULES = {
 export const ACCESS_REVIEW_RULES = {
 	version: 1 as const,
 	open_gate_requires_facts: true,
+	owner: 'decision-matrix',
+	ticket: 'access-review',
 	default_action: {
 		type: 'review',
 		target: 'owner',

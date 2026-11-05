@@ -33,10 +33,13 @@
         "questionSet": "support",
         "rules": {
           "version": 1,
+          "owner": "decision-matrix",
+          "ticket": "support",
           "default_action": {
             "type": "escalate",
             "target": "human",
-            "reason": "No matching rule"
+            "reason": "No matching rule",
+            "gate": true
           },
           "thresholds": {
             "page_threshold": 0.8,

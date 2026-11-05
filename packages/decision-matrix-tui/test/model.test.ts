@@ -42,7 +42,15 @@ describe('workspace', () => {
 
 	test('derives lint, cases, and an empty diff from the shipped policy', () => {
 		const derived = derive(ciWorkspace());
-		expect(derived.findings).toEqual([]);
+		expect(derived.findings.map((finding) => `${finding.code}:${finding.rule}`)).toEqual([
+			'overlap:hold-injection',
+			'overlap:hold-suspicious-code',
+			'overlap:hold-mismatch',
+			'overlap:hold-risk',
+			'overlap:auto-merge-dependency-patch',
+			'overlap:pass-docs',
+			'overlap:pass-small-change',
+		]);
 		expect(derived.run?.results.every((result) => result.passed)).toBe(true);
 		expect(derived.changes).toEqual([]);
 	});

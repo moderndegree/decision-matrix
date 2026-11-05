@@ -59,6 +59,28 @@ describe('decide with facts', () => {
 		assert.equal(result.exitCode, EXIT_OK);
 	});
 
+	it('still asks the server for a question an opening rule reads', async () => {
+		await assert.rejects(
+			decide({
+				state: 'diff',
+				questions: CI_CHANGE_QUESTIONS,
+				rules: CI_CHANGE_RULES,
+				facts: CI_FACTS,
+				scripts: {
+					version: 1,
+					scripts: [
+						{ question: 'content_contains_instructions', else: true, noul: 0.02 },
+						{ question: 'suspicious_code', else: true, noul: 0.02 },
+						{ question: 'description_matches_diff', else: true, noul: 0.95 },
+						{ question: 'changes_runtime_behavior', else: true, noul: 0.9 },
+						{ question: 'risk', else: true, score: 1, confidence: 0.9 },
+					],
+				},
+			}),
+			/A decision server URL is required/,
+		);
+	});
+
 	it('rejects a facts file that is not an object', async () => {
 		const { io, stderr } = captured(['decide', '--preset', 'ci-change', '--facts', 'f.json'], { 'f.json': '[]' });
 		assert.equal(await run(io), EXIT_ERROR);

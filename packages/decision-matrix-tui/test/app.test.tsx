@@ -21,8 +21,8 @@ describe('decision-matrix-tui', () => {
 		expect(screen).toContain('Rules · ci-change.rules.json');
 		expect(screen).toContain('1 ● hold-ci-config facts 1✓');
 		expect(screen).toContain('10 ○ pass-small-change');
-		expect(screen).toContain('Cases 16/16');
-		expect(screen).toContain('saved · lint 0 errors 0 warnings · cases 16/16');
+		expect(screen).toContain('Cases 36/36');
+		expect(screen).toContain('saved · lint 0 errors 7 warnings · cases 36/36');
 		expect(screen).toContain('✓ fact touches_ci eq true   = true');
 		setup.renderer.destroy();
 	});
@@ -34,7 +34,7 @@ describe('decision-matrix-tui', () => {
 		for (let i = 0; i < 9; i++) await press(() => keys.pressArrow('right'));
 		let screen = await frame();
 		expect(screen).toContain('injection        0.95');
-		expect(screen).toContain('Cases 14/16');
+		expect(screen).toContain('Cases 34/36');
 		expect(screen).toContain('✗ text addressing');
 		expect(screen).toContain('unsaved (loosens 1, tightens 0)');
 
@@ -101,13 +101,13 @@ describe('decision-matrix-tui', () => {
 		let screen = '';
 		for (let i = 0; i < 15; i++) screen = await press(() => keys.pressArrow('left'));
 		expect(screen).toContain('content_contains_instructions (noul)  0.05');
-		expect(screen).toContain('Cases 15/16');
+		expect(screen).toContain('Cases 35/36');
 		expect(screen).toContain('pass via pass-small-change');
 
 		await press(() => keys.pressTab({ shift: true }));
 		screen = await press(() => keys.pressKey('u'));
 		expect(screen).toContain('The case now expects this decision.');
-		expect(screen).toContain('Cases 16/16');
+		expect(screen).toContain('Cases 36/36');
 		setup.renderer.destroy();
 	});
 
@@ -167,11 +167,11 @@ describe('rule editor', () => {
 		screen = await press(() => keys.pressEnter());
 		expect(screen).toContain('is at least  high_confidence (0.85)');
 		expect(screen).toContain('loosens: "hold-injection" matches fewer events');
-		expect(screen).toContain('Cases that change: 2 of 16');
+		expect(screen).toContain('Cases that change: 2 of 36');
 
 		screen = await press(() => keys.pressKey('s', { ctrl: true }));
 		expect(screen).toContain('Rule applied. ctrl+s saves the file.');
-		expect(screen).toContain('Cases 14/16');
+		expect(screen).toContain('Cases 34/36');
 		// The status message gives way to the summary on the next key.
 		screen = await press(() => keys.pressArrow('down'));
 		expect(screen).toContain('unsaved (loosens 1, tightens 0)');

@@ -1,5 +1,5 @@
 import type { Condition, LintFinding, Rule, TraceNode } from 'decision-matrix-rules';
-import { referencedQuestions } from 'decision-matrix-rules';
+import { flatWhen, referencedQuestions } from 'decision-matrix-rules';
 import type { CaseResult } from 'decision-matrix-cli';
 
 import type { CaseValue } from './model';
@@ -79,7 +79,7 @@ export function ruleLines(rules: Rule[], defaultAction: Rule['action'], findings
 		};
 	});
 	lines.push({
-		text: `${' '.repeat(width)} ${defaultAction.gate ? '●' : '○'} default → ${defaultAction.type} · ${defaultAction.target}${hasCases ? ` ${covered.get(null) ?? 0}✓` : ''}`,
+		text: `${' '.repeat(width)} ${defaultAction.gate ? '●' : '○'} default → ${defaultAction.type} · ${defaultAction.target} · footer${hasCases ? ` ${covered.get(null) ?? 0}✓` : ''}`,
 		tone: defaultAction.gate ? 'dim' : 'warn',
 		selected: selected === rules.length,
 	});
@@ -89,7 +89,7 @@ export function ruleLines(rules: Rule[], defaultAction: Rule['action'], findings
 /** The detail pane for the default action, the one that applies when no rule matches. */
 export function defaultLines(action: Rule['action'], findings: LintFinding[], strict: boolean): Line[] {
 	const lines: Line[] = [
-		{ text: 'Applies when no rule matches.', tone: 'dim' },
+		{ text: 'Footer. Applies when no rule matches. It cannot be moved.', tone: 'dim' },
 		{ text: `→ ${action.type} · ${action.target} · ${action.gate ? 'holds' : 'opens the gate'}`, tone: action.gate ? 'hold' : 'open' },
 		{ text: `  ${action.reason}`, tone: 'dim' },
 		{ text: '' },
@@ -113,6 +113,8 @@ export function detailLines(rule: Rule | undefined, thresholds: Record<string, n
 	});
 	lines.push({ text: `  ${rule.action.reason}`, tone: 'dim' });
 	lines.push({ text: caseName ? `when   (checked against "${caseName}")` : 'when', tone: 'accent' });
+	const flat = flatWhen(rule.when);
+	if (flat) lines.push({ text: `  ${flat}`, tone: 'dim' });
 	if (traceError) lines.push({ text: `  could not evaluate: ${traceError}`, tone: 'warn' });
 	conditionLines(rule.when, trace, thresholds, 1, lines);
 	for (const finding of findings.filter((entry) => entry.rule === rule.id)) {
@@ -139,7 +141,9 @@ function conditionLines(condition: Condition, trace: TraceNode | undefined, thre
 			if ('values' in operator) return `${operator.op} [${operator.values.map((value) => JSON.stringify(value)).join(', ')}]`;
 			const value = operator.value;
 			if (value !== null && typeof value === 'object') {
-				return value.kind === 'number' ? `${operator.op} ${value.value}` : `${operator.op} ${value.name} (${thresholds[value.name]})`;
+				if (value.kind === 'instant') return `${operator.op} ${new Date(value.ms).toISOString()}`;
+				if (value.kind === 'number') return `${operator.op} ${value.value}`;
+				return `${operator.op} ${value.name} (${thresholds[value.name]})`;
 			}
 			return `${operator.op} ${JSON.stringify(value)}`;
 		})

@@ -4,10 +4,12 @@ import { parseArgs } from 'node:util';
 import { RulesError, isPlainObject, lintRuleset, type LintFinding, type LintQuestion } from 'decision-matrix-rules';
 import { SCRIPT_PRESETS, SystemOneError } from 'decision-matrix-systemone';
 
-import { formatCaseRun, readCases, runCases, uncovered } from './cases';
+import { factErrorGaps, formatCaseRun, readCaseDocument, readCases, runCases, uncovered } from './cases';
 import { decide, EXIT_ERROR, EXIT_GATE, EXIT_OK } from './decide';
 import { diffPolicies, formatPolicyDiff } from './diff';
+import { formatTable, importFlatRules, tableJson } from './import-table';
 import { DEFAULT_PRESET, POLICY_PRESETS } from './presets';
+import { formatQuestionsNote, formatShadow, formatSweep, questionsFileHash, shadowCases, sweepThresholds } from './shadow';
 
 export interface CliIO {
 	argv: string[];
@@ -27,6 +29,10 @@ Commands:
   test     Run policy test cases against a ruleset, without a server
   check    Lint a ruleset without running it
   diff     Explain what a ruleset change does to the policy
+  shadow   Replay a candidate ruleset on saved cases and print both actions
+  sweep    Count hold and open flips across probability cutoffs
+  table    Print a read-only table of flat rules
+  import   Compile flat rule rows into a ruleset
 
 decision-matrix decide — classify one event and print one action
 
@@ -90,6 +96,9 @@ Options:
   --rules, --preset     The ruleset under test.
   --threshold <name=n>  Replace one threshold for every case.
   --require-coverage    Also fail when no case matches some rule.
+  --require-fact-errors Also fail unless every referenced fact has a passing
+                        absent-fact case and a passing wrong-type case, both
+                        expecting an error. Use omit_facts to drop a default.
   --json                Print the results as JSON.
 
 Exit codes:
@@ -110,7 +119,8 @@ Options:
   --questions <file>    Check question ids, types, and labels against these.
                         With --preset and no --questions, the preset's are used.
   --threshold <name=n>  Replace one threshold.
-  --strict              Fail on warnings as well as errors.
+  --strict              Fail on warnings as well as errors. Also requires an
+                        owner and a ticket when the ruleset can open the gate.
   --json                Print the findings as JSON.
 
 Exit codes:
@@ -142,6 +152,67 @@ Exit codes:
   1  a file could not be read, or a ruleset is invalid
   2  diff printed and it loosens the policy, because --fail-on-loosen was set
 
+decision-matrix shadow — replay a candidate ruleset on saved cases
+
+Prints both actions. Rows that held and now open come first, then rows that
+opened and now hold, then the rest. Nothing is written back.
+
+Usage:
+  decision-matrix shadow --from <file> --to <file> --cases <file> [options]
+
+Options:
+  --from, --to, --cases   The baseline ruleset, the candidate, and the cases.
+  --fail-on-open          Exit 2 when any case held before and opens now.
+  --json                  Print the rows as JSON.
+
+Exit codes:
+  0  comparison printed
+  1  a file could not be read, or a ruleset is invalid
+  2  comparison printed and a case went from hold to open, because --fail-on-open was set
+
+decision-matrix sweep — count flips across probability cutoffs
+
+For each threshold whose baseline is from 0 to 1, replays the cases at
+0.50, 0.55, … 0.95 and at the baseline. It does not write a cutoff back.
+It is not a calibration. When the case file has no provenance, the report says so.
+
+Usage:
+  decision-matrix sweep (--rules <file> | --preset <name>) --cases <file> [options]
+
+Options:
+  --rules, --preset     The ruleset whose thresholds are swept.
+  --cases <file>        The cases to replay.
+  --questions <file>    Compare sha256 of this file with provenance.questions_hash.
+                        A mismatch is a note, not a failure.
+  --json                Print the grid as JSON.
+
+Exit codes:
+  0  grid printed
+  1  a file could not be read, or a ruleset is invalid
+
+decision-matrix table — print a read-only table of flat rules
+
+A top-level all of predicates is one line. Nested groups and a top-level any
+print as (tree). The default action is a footer.
+
+Usage:
+  decision-matrix table (--rules <file> | --preset <name>) [options]
+
+  --json                Print the rows as JSON.
+
+decision-matrix import — compile flat rule rows into a ruleset
+
+Each cell is one subject, one operator from the closed set, and one value.
+An unknown operator, a nested group, or any other shape fails the file.
+The command prints a ruleset and does not write it.
+
+Usage:
+  decision-matrix import --rules <file>
+
+Exit codes:
+  0  ruleset printed
+  1  the file could not be read or is not a flat ruleset
+
 Starter files:
   packages/decision-matrix-cli/examples/attack-triage.questions.json
   packages/decision-matrix-cli/examples/attack-triage.rules.json
@@ -168,12 +239,14 @@ const CLI_OPTIONS = {
 	local: { type: 'boolean' },
 	cases: { type: 'string' },
 	'require-coverage': { type: 'boolean' },
+	'require-fact-errors': { type: 'boolean' },
 	strict: { type: 'boolean' },
 	json: { type: 'boolean' },
 	from: { type: 'string' },
 	to: { type: 'string' },
 	format: { type: 'string' },
 	'fail-on-loosen': { type: 'boolean' },
+	'fail-on-open': { type: 'boolean' },
 	help: { type: 'boolean', short: 'h' },
 } as const;
 
@@ -184,9 +257,13 @@ const COMMAND_OPTIONS: Record<string, ReadonlySet<OptionName>> = {
 		'questions', 'rules', 'preset', 'answers', 'server', 'api-key', 'model',
 		'timeout', 'threshold', 'fail-on-gate', 'state', 'facts', 'scripts', 'local', 'help',
 	]),
-	test: new Set<OptionName>(['rules', 'preset', 'cases', 'threshold', 'require-coverage', 'json', 'help']),
+	test: new Set<OptionName>(['rules', 'preset', 'cases', 'threshold', 'require-coverage', 'require-fact-errors', 'json', 'help']),
 	check: new Set<OptionName>(['rules', 'preset', 'questions', 'threshold', 'strict', 'json', 'help']),
 	diff: new Set<OptionName>(['from', 'to', 'cases', 'format', 'json', 'fail-on-loosen', 'help']),
+	shadow: new Set<OptionName>(['from', 'to', 'cases', 'fail-on-open', 'json', 'help']),
+	sweep: new Set<OptionName>(['rules', 'preset', 'cases', 'questions', 'json', 'help']),
+	table: new Set<OptionName>(['rules', 'preset', 'json', 'help']),
+	import: new Set<OptionName>(['rules', 'json', 'help']),
 };
 
 function parseArgv(argv: string[]) {
@@ -239,6 +316,10 @@ export async function run(io: CliIO): Promise<number> {
 		if (command === 'test') return await runTest(io, values);
 		if (command === 'check') return await runCheck(io, values);
 		if (command === 'diff') return await runDiff(io, values);
+		if (command === 'shadow') return await runShadow(io, values);
+		if (command === 'sweep') return await runSweep(io, values);
+		if (command === 'table') return await runTable(io, values);
+		if (command === 'import') return await runImport(io, values);
 		const presetName = typeof values.preset === 'string' ? values.preset : DEFAULT_PRESET;
 		const preset = presetFor(presetName);
 		const questions = values.questions ? parseJson(await io.readFile(values.questions), values.questions) : preset.questions;
@@ -313,14 +394,16 @@ async function runTest(io: CliIO, values: Values): Promise<number> {
 	const cases = readCases(parseJson(await io.readFile(values.cases), values.cases), values.cases);
 	const result = runCases(rules, cases, readThresholds(values.threshold));
 	const untested = uncovered(result);
-	const failed = result.results.some((entry) => !entry.passed) || (values['require-coverage'] === true && untested.length > 0);
+	const gaps = values['require-fact-errors'] === true ? factErrorGaps(rules, cases, result.results) : [];
+	const failed = result.results.some((entry) => !entry.passed) || (values['require-coverage'] === true && untested.length > 0) || gaps.length > 0;
 	if (values.json === true) {
-		io.stdout(`${JSON.stringify({ passed: !failed, results: result.results, uncovered: untested }, null, 2)}\n`);
+		io.stdout(`${JSON.stringify({ passed: !failed, results: result.results, uncovered: untested, fact_error_gaps: gaps }, null, 2)}\n`);
 	} else {
 		io.stdout(formatCaseRun(result, values.cases));
 		if (values['require-coverage'] === true && untested.length > 0) {
 			io.stdout('--require-coverage is set, so uncovered rules fail the run.\n');
 		}
+		for (const gap of gaps) io.stdout(`${gap}\n`);
 	}
 	return failed ? EXIT_ERROR : EXIT_OK;
 }
@@ -335,7 +418,11 @@ async function runCheck(io: CliIO, values: Values): Promise<number> {
 	} else if (values.preset) {
 		questions = presetFor(values.preset).questions as Record<string, LintQuestion>;
 	}
-	const findings = lintRuleset(rules, { questions, thresholdOverrides: readThresholds(values.threshold) });
+	const findings = lintRuleset(rules, {
+		questions,
+		thresholdOverrides: readThresholds(values.threshold),
+		governance: values.strict === true,
+	});
 	const errors = findings.filter((finding) => finding.severity === 'error').length;
 	const warnings = findings.filter((finding) => finding.severity === 'warning').length;
 	const failed = errors > 0 || (values.strict === true && warnings > 0);
@@ -360,6 +447,46 @@ async function runDiff(io: CliIO, values: Values): Promise<number> {
 	if (values.json === true) io.stdout(`${JSON.stringify(diff, null, 2)}\n`);
 	else io.stdout(formatPolicyDiff(diff, values.from, values.to, format === 'markdown'));
 	return values['fail-on-loosen'] === true && diff.loosens ? EXIT_GATE : EXIT_OK;
+}
+
+async function runShadow(io: CliIO, values: Values): Promise<number> {
+	if (!values.from || !values.to || !values.cases) throw new Error('shadow needs --from <file>, --to <file>, and --cases <file>.');
+	const from = parseJson(await io.readFile(values.from), values.from);
+	const to = parseJson(await io.readFile(values.to), values.to);
+	const cases = readCases(parseJson(await io.readFile(values.cases), values.cases), values.cases);
+	const rows = shadowCases(from, to, cases);
+	if (values.json === true) io.stdout(`${JSON.stringify({ rows }, null, 2)}\n`);
+	else io.stdout(formatShadow(rows, values.from, values.to));
+	const opens = rows.some((row) => row.kind === 'hold-to-open');
+	return values['fail-on-open'] === true && opens ? EXIT_GATE : EXIT_OK;
+}
+
+async function runSweep(io: CliIO, values: Values): Promise<number> {
+	if (!values.cases) throw new Error('sweep needs --cases <file>.');
+	const rules = await loadRules(io, values, 'sweep');
+	const text = await io.readFile(values.cases);
+	const document = readCaseDocument(parseJson(text, values.cases), values.cases);
+	const lines = sweepThresholds(rules, document.cases);
+	const questionsNote = values.questions ? formatQuestionsNote(questionsFileHash(await io.readFile(values.questions)), document.provenance?.questions_hash) : undefined;
+	if (values.json === true) {
+		io.stdout(`${JSON.stringify({ provenance: document.provenance ?? null, questions_note: questionsNote ?? null, lines }, null, 2)}\n`);
+	} else {
+		io.stdout(formatSweep(lines, document.provenance, questionsNote));
+	}
+	return EXIT_OK;
+}
+
+async function runTable(io: CliIO, values: Values): Promise<number> {
+	const rules = await loadRules(io, values, 'table');
+	io.stdout(values.json === true ? `${JSON.stringify(tableJson(rules), null, 2)}\n` : formatTable(rules));
+	return EXIT_OK;
+}
+
+async function runImport(io: CliIO, values: Values): Promise<number> {
+	if (!values.rules) throw new Error('import needs --rules <file>.');
+	const ruleset = importFlatRules(parseJson(await io.readFile(values.rules), values.rules));
+	io.stdout(`${JSON.stringify(ruleset, null, 2)}\n`);
+	return EXIT_OK;
 }
 
 function formatFindings(findings: LintFinding[], checkedQuestions: boolean): string {

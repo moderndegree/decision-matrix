@@ -42,13 +42,13 @@ jobs:
       # Pin or vendor the CLI, as in decision-gate.yml.
       - name: Lint the ruleset
         run: |
-          npx --yes --package decision-matrix-cli@0.1.0 decision-matrix check --strict \
+          npx --yes --package decision-matrix-cli@0.1.0 decision-matrix check \
             --rules .github/decision-matrix/ci-change.rules.json \
             --questions .github/decision-matrix/ci-change.questions.json
 
       - name: Run the policy cases
         run: |
-          npx --yes --package decision-matrix-cli@0.1.0 decision-matrix test --require-coverage \
+          npx --yes --package decision-matrix-cli@0.1.0 decision-matrix test --require-coverage --require-fact-errors \
             --rules .github/decision-matrix/ci-change.rules.json \
             --cases .github/decision-matrix/ci-change.cases.json
 

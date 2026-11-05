@@ -1,10 +1,11 @@
 import {
 	RulesError,
 	decideFromFacts,
-	validateFacts,
 	evaluateRules,
 	isPlainObject,
+	referencedFacts,
 	traceRules,
+	validateFacts,
 	validateRuleset,
 	type AnswerView,
 	type EvaluationResult,
@@ -45,6 +46,18 @@ export interface PolicyCase {
 	expect: CaseExpectation;
 }
 
+/** Saved with the case file when the answers came from one model run. All three fields are required together. */
+export interface CaseProvenance {
+	model_id: string | null;
+	temperature: number | null;
+	questions_hash: string;
+}
+
+export interface CaseDocument {
+	cases: PolicyCase[];
+	provenance?: CaseProvenance;
+}
+
 export interface CaseResult {
 	name: string;
 	passed: boolean;
@@ -64,14 +77,19 @@ export interface CaseRun {
 	covered: Set<string | null>;
 }
 
-const FILE_KEYS = new Set(['$schema', 'version', 'defaults', 'cases']);
+const FILE_KEYS = new Set(['$schema', 'version', 'defaults', 'cases', 'provenance']);
 const THRESHOLD_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const RESERVED = new Set(['__proto__', 'prototype', 'constructor']);
 const DEFAULT_KEYS = new Set(['facts', 'answers', 'thresholds']);
-const CASE_KEYS = new Set(['name', 'facts', 'answers', 'thresholds', 'expect']);
+const CASE_KEYS = new Set(['name', 'facts', 'answers', 'thresholds', 'omit_facts', 'expect']);
 const EXPECT_KEYS = new Set(['matched_rule', 'action', 'target', 'reason', 'gate', 'from_facts', 'error']);
+const FACT_SEGMENT = /^[A-Za-z_][A-Za-z0-9_-]*$/;
 
 export function readCases(input: unknown, source = 'cases'): PolicyCase[] {
+	return readCaseDocument(input, source).cases;
+}
+
+export function readCaseDocument(input: unknown, source = 'cases'): CaseDocument {
 	if (!isPlainObject(input) || input.version !== 1 || !Array.isArray(input.cases)) {
 		throw new Error(`${source} must be { "version": 1, "cases": [ ... ] }.`);
 	}
@@ -86,8 +104,9 @@ export function readCases(input: unknown, source = 'cases'): PolicyCase[] {
 		if (!isPlainObject(defaults[key])) throw new Error(`${source} defaults.${key} must be an object.`);
 	}
 	checkParts(defaults, `${source} defaults`);
+	const provenance = readProvenance(input.provenance, source);
 	const names = new Set<string>();
-	return input.cases.map((entry, index) => {
+	const cases = input.cases.map((entry, index) => {
 		const path = `${source} cases[${index}]`;
 		if (!isPlainObject(entry)) throw new Error(`${path} must be an object.`);
 		for (const key of Object.keys(entry)) {
@@ -99,6 +118,9 @@ export function readCases(input: unknown, source = 'cases'): PolicyCase[] {
 		for (const key of ['facts', 'answers', 'thresholds'] as const) {
 			if (entry[key] !== undefined && !isPlainObject(entry[key])) throw new Error(`${path}.${key} must be an object.`);
 		}
+		if (entry.omit_facts !== undefined && (!Array.isArray(entry.omit_facts) || !entry.omit_facts.every((item) => typeof item === 'string'))) {
+			throw new Error(`${path}.omit_facts must be an array of fact paths.`);
+		}
 		checkParts(entry, path);
 		const expect = entry.expect;
 		if (!isPlainObject(expect) || Object.keys(expect).length === 0) {
@@ -108,7 +130,8 @@ export function readCases(input: unknown, source = 'cases'): PolicyCase[] {
 			if (!EXPECT_KEYS.has(key)) throw new Error(`${path}.expect has unknown key "${key}". Expected: ${[...EXPECT_KEYS].join(', ')}.`);
 		}
 		checkExpect(expect, `${path}.expect`);
-		const facts = mergeFacts(defaults.facts, entry.facts);
+		const merged = mergeFacts(defaults.facts, entry.facts);
+		const facts = Array.isArray(entry.omit_facts) ? omitFactPaths(merged ?? {}, entry.omit_facts as string[]) : merged;
 		const answers = defaults.answers || entry.answers ? { ...(defaults.answers as object), ...(entry.answers as object) } : undefined;
 		const thresholds =
 			defaults.thresholds || entry.thresholds ? { ...(defaults.thresholds as object), ...(entry.thresholds as object) } : undefined;
@@ -120,6 +143,52 @@ export function readCases(input: unknown, source = 'cases'): PolicyCase[] {
 			expect: expect as CaseExpectation,
 		};
 	});
+	return provenance ? { cases, provenance } : { cases };
+}
+
+function readProvenance(value: unknown, source: string): CaseProvenance | undefined {
+	if (value === undefined) return undefined;
+	if (!isPlainObject(value)) throw new Error(`${source} provenance must be an object.`);
+	for (const key of Object.keys(value)) {
+		if (key !== 'model_id' && key !== 'temperature' && key !== 'questions_hash') {
+			throw new Error(`${source} provenance has unknown key "${key}".`);
+		}
+	}
+	for (const key of ['model_id', 'temperature', 'questions_hash'] as const) {
+		if (!Object.prototype.hasOwnProperty.call(value, key)) throw new Error(`${source} provenance.${key} is required.`);
+	}
+	if (value.model_id !== null && typeof value.model_id !== 'string') {
+		throw new Error(`${source} provenance.model_id must be a string or null.`);
+	}
+	if (value.temperature !== null && (typeof value.temperature !== 'number' || !Number.isFinite(value.temperature))) {
+		throw new Error(`${source} provenance.temperature must be a number or null.`);
+	}
+	if (typeof value.questions_hash !== 'string' || value.questions_hash.trim() === '') {
+		throw new Error(`${source} provenance.questions_hash must be a non-empty string.`);
+	}
+	return { model_id: value.model_id as string | null, temperature: value.temperature as number | null, questions_hash: value.questions_hash };
+}
+
+/** Deletes dotted paths after the defaults merge, so a case can assert that a default fact is absent. */
+function omitFactPaths(facts: Record<string, unknown>, paths: string[]): Record<string, unknown> {
+	const clone = structuredClone(facts);
+	for (const factPath of paths) {
+		const segments = factPath.split('.');
+		if (segments.some((segment) => !FACT_SEGMENT.test(segment) || RESERVED.has(segment))) {
+			throw new Error(`omit_facts path "${factPath}" is not a fact path.`);
+		}
+		let current: unknown = clone;
+		for (let index = 0; index < segments.length - 1; index++) {
+			if (!isPlainObject(current)) {
+				current = undefined;
+				break;
+			}
+			current = current[segments[index]!];
+		}
+		const leaf = segments[segments.length - 1]!;
+		if (isPlainObject(current)) delete current[leaf];
+	}
+	return clone;
 }
 
 /** Facts, thresholds, and answer shapes, as cases.schema.json describes them. */
@@ -266,7 +335,42 @@ export function uncovered(run: CaseRun): string[] {
 	return run.rules.filter((id) => !run.covered.has(id));
 }
 
-/** One line per rule, in order, up to the rule that won. */
+/**
+ * Paths a ruleset reads that lack a passing absent-fact error and a passing
+ * wrong-type error. An error counts only when its message names the path.
+ * Absence is a merged fact that is not present. A wrong type is a merged fact
+ * that is present. A decision is not an acceptable expected result for either.
+ */
+export function factErrorGaps(rules: unknown, cases: PolicyCase[], results: CaseResult[]): string[] {
+	const ruleset = validateRuleset(rules);
+	const paths: string[] = [];
+	for (const rule of ruleset.rules) {
+		for (const path of referencedFacts(rule.when)) if (!paths.includes(path)) paths.push(path);
+	}
+	const gaps: string[] = [];
+	for (const path of paths) {
+		const absent = cases.some((testCase, index) => errorCaseCounts(testCase, results[index], path) && !factPresent(testCase.facts, path));
+		const wrong = cases.some((testCase, index) => errorCaseCounts(testCase, results[index], path) && factPresent(testCase.facts, path));
+		if (!absent) gaps.push(`No passing case omits "${path}" and expects an error.`);
+		if (!wrong) gaps.push(`No passing case supplies the wrong type for "${path}" and expects an error.`);
+	}
+	return gaps;
+}
+
+function errorCaseCounts(testCase: PolicyCase, result: CaseResult | undefined, path: string): boolean {
+	return testCase.expect.error !== undefined && result?.passed === true && (result.error?.includes(path) ?? false);
+}
+
+function factPresent(facts: Record<string, unknown> | undefined, path: string): boolean {
+	let current: unknown = facts ?? {};
+	for (const segment of path.split('.')) {
+		if (!isPlainObject(current) || !Object.prototype.hasOwnProperty.call(current, segment)) return false;
+		current = current[segment];
+	}
+	return true;
+}
+
+/** One line per rule up to the winner, then later matches that did not apply. */
 export function formatWhy(trace: EvaluationTrace): string[] {
 	const lines = ['why:'];
 	const width = Math.max(...trace.rules.map((rule) => rule.id.length), 7);
@@ -276,7 +380,13 @@ export function formatWhy(trace: EvaluationTrace): string[] {
 		if (rule.error) lines.push(`  ${label}  error  ${rule.error}`);
 		else if (rule.matched) lines.push(`  ${label}  match${rule.id === winner ? '' : '  (an earlier rule won)'}`);
 		else lines.push(`  ${label}  no     ${rule.when ? missed(rule.when).slice(0, 3).join('; ') : ''}`);
-		if (rule.id === winner) return lines;
+		if (rule.id === winner) {
+			for (const later of trace.rules) {
+				if (!later.did_not_apply) continue;
+				lines.push(`  ${later.id.padEnd(width)}  match  (did not apply)`);
+			}
+			return lines;
+		}
 	}
 	lines.push(`  ${'default'.padEnd(width)}  match`);
 	return lines;

@@ -1,5 +1,7 @@
 {
   "version": 1,
+  "owner": "decision-matrix",
+  "ticket": "attack-triage",
   "default_action": {
     "type": "escalate",
     "target": "human",

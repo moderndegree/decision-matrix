@@ -36,6 +36,11 @@ export function diffRulesets(fromInput: unknown, toInput: unknown): PolicyChange
 		add('tightens', 'open_gate_requires_facts was turned on. Every rule that opens the gate now needs a fact.');
 	}
 
+	if ((from.owner ?? '') !== (to.owner ?? '')) add('neutral', `owner: ${from.owner ?? '(none)'} → ${to.owner ?? '(none)'}.`);
+	if ((from.ticket ?? '') !== (to.ticket ?? '')) add('neutral', `ticket: ${from.ticket ?? '(none)'} → ${to.ticket ?? '(none)'}.`);
+	if (JSON.stringify(from.fact_schema ?? null) !== JSON.stringify(to.fact_schema ?? null)) add('neutral', 'fact_schema changed.');
+	diffAgreements(from, to, add);
+
 	diffAction(from.default_action, to.default_action, 'default_action', undefined, add);
 
 	for (const name of new Set([...Object.keys(from.thresholds), ...Object.keys(to.thresholds)])) {
@@ -74,6 +79,26 @@ export function diffRulesets(fromInput: unknown, toInput: unknown): PolicyChange
 
 	diffOrder(from, to, add);
 	return changes;
+}
+
+/** Adding an agreement can only add holds. Removing one takes a hold away. */
+function diffAgreements(
+	from: Ruleset,
+	to: Ruleset,
+	add: (effect: ChangeEffect, message: string, rule?: string) => void,
+): void {
+	const key = (agreement: { question: string; fact: string; relation: string }) =>
+		`${agreement.question}\0${agreement.fact}\0${agreement.relation}`;
+	const before = new Set((from.agreements ?? []).map(key));
+	const after = new Set((to.agreements ?? []).map(key));
+	for (const agreement of to.agreements ?? []) {
+		if (before.has(key(agreement))) continue;
+		add('tightens', `Added an agreement: question "${agreement.question}" ${agreement.relation} fact "${agreement.fact}". A disagreement can now force a hold.`);
+	}
+	for (const agreement of from.agreements ?? []) {
+		if (after.has(key(agreement))) continue;
+		add('loosens', `Removed an agreement: question "${agreement.question}" ${agreement.relation} fact "${agreement.fact}". That disagreement no longer forces a hold.`);
+	}
 }
 
 function diffAction(
@@ -149,7 +174,9 @@ function resolved(condition: Condition, thresholds: Record<string, number>): unk
 		if ('values' in operator) return [operator.op, operator.values];
 		const value = operator.value;
 		if (value !== null && typeof value === 'object') {
-			return [operator.op, value.kind === 'number' ? value.value : thresholds[value.name]];
+			if (value.kind === 'number') return [operator.op, value.value];
+			if (value.kind === 'instant') return [operator.op, value.ms];
+			return [operator.op, thresholds[value.name]];
 		}
 		return [operator.op, value];
 	});

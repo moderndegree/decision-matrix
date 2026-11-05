@@ -40,6 +40,8 @@ export interface EditorContext {
 	facts: string[];
 	/** A value each fact has in the cases, so a new comparison can fit its type. */
 	factSamples?: Record<string, unknown>;
+	/** Declared fact types from fact_schema, keyed by path. */
+	factTypes?: Record<string, string>;
 	/** Action types used elsewhere in the ruleset, for cycling. */
 	actionTypes: string[];
 }
@@ -95,7 +97,10 @@ function conditionRows(node: unknown, path: Path, depth: number, root: boolean, 
 }
 
 function subjectOf(node: JsonObject, context: EditorContext): Subject {
-	if (typeof node.fact === 'string') return { kind: 'fact', name: node.fact };
+	if (typeof node.fact === 'string') {
+		const type = context.factTypes?.[node.fact];
+		return type ? { kind: 'fact', name: node.fact, type } : { kind: 'fact', name: node.fact };
+	}
 	const name = typeof node.question === 'string' ? node.question : '';
 	const type = context.questions?.[name]?.type;
 	return typeof type === 'string' ? { kind: 'question', name, type } : { kind: 'question', name };
@@ -315,7 +320,8 @@ function newPredicate(context: EditorContext): JsonObject {
 		return { question, [op]: defaultValue(op, subject, context) };
 	}
 	const fact = context.facts[0] ?? 'replace_me';
-	const subject: Subject = { kind: 'fact', name: fact };
+	const factType = context.factTypes?.[fact];
+	const subject: Subject = factType ? { kind: 'fact', name: fact, type: factType } : { kind: 'fact', name: fact };
 	const op = firstOperator(subject, context);
 	return { fact, [op]: defaultValue(op, subject, context) };
 }
@@ -337,7 +343,13 @@ const OP_WORDS: Record<string, string> = {
 	not_contains: 'does not include',
 };
 
-export function operatorWords(op: string): string {
+export function operatorWords(op: string, factType?: string): string {
+	if (factType === 'instant') {
+		if (op === 'lt') return 'is before';
+		if (op === 'lte') return 'is at or before';
+		if (op === 'gt') return 'is after';
+		if (op === 'gte') return 'is at or after';
+	}
 	return OP_WORDS[op] ?? op;
 }
 
@@ -378,7 +390,7 @@ function describeCondition(node: unknown, context: EditorContext, depth: number,
 	}
 	const subject = subjectOf(node, context);
 	const name = subject.kind === 'fact' ? `the fact ${subject.name}` : subject.name;
-	const parts = operatorKeys(node).map((op) => `${operatorWords(op)} ${valueText(node[op], op, context)}`);
+	const parts = operatorKeys(node).map((op) => `${operatorWords(op, subject.type)} ${valueText(node[op], op, context)}`);
 	lines.push(`${pad}• ${name} ${parts.join(' and ')}`);
 }
 

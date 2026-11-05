@@ -2,12 +2,17 @@ import { describeValue, isPlainObject } from './object';
 import { RulesError } from './errors';
 import type {
 	ActionSpec,
+	Agreement,
 	AnswerView,
 	Condition,
 	EvaluationResult,
 	FactOperator,
+	FactSchemaEntry,
+	FactSchemaType,
 	FactValue,
 	Operator,
+	OrderedValue,
+	QuestionContribution,
 	Rule,
 	Ruleset,
 	ThresholdRef,
@@ -58,9 +63,23 @@ export type ThresholdMap = Record<string, number>;
 /** Host-verified values keyed by name. Nested objects are reached with dotted paths. */
 export type FactMap = Record<string, unknown>;
 
-const RULESET_KEYS = new Set(['$schema', 'version', 'default_action', 'thresholds', 'rules', 'open_gate_requires_facts']);
+const RULESET_KEYS = new Set([
+	'$schema',
+	'version',
+	'default_action',
+	'thresholds',
+	'rules',
+	'open_gate_requires_facts',
+	'owner',
+	'ticket',
+	'fact_schema',
+	'agreements',
+]);
 /** The numeric strings an operand may use. The same pattern is in ruleset.schema.json. */
 const NUMERIC_STRING = /^[-+]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][-+]?[0-9]+)?$/;
+/** A timestamp with an offset. Date-only strings are not instants and are not ordered. */
+const INSTANT_STRING = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2}))$/;
+const FACT_SCHEMA_TYPES = new Set<FactSchemaType>(['string', 'number', 'boolean', 'null', 'instant', 'array']);
 const RULE_KEYS = new Set(['id', 'description', 'when', 'action']);
 const ACTION_KEYS = new Set(['type', 'target', 'reason', 'gate']);
 
@@ -96,6 +115,10 @@ export function validateRuleset(input: unknown): Ruleset {
 	}
 	const strict = input.open_gate_requires_facts === true;
 	if (strict) assertModelCannotOpenGate(defaultAction, rules);
+	const owner = readOptionalText(input.owner, 'rules.owner');
+	const ticket = readOptionalText(input.ticket, 'rules.ticket');
+	const factSchema = readFactSchema(input.fact_schema);
+	const agreements = readAgreements(input.agreements);
 
 	return {
 		version: 1,
@@ -103,6 +126,10 @@ export function validateRuleset(input: unknown): Ruleset {
 		thresholds,
 		rules,
 		...(strict ? { open_gate_requires_facts: true } : {}),
+		...(owner !== undefined ? { owner } : {}),
+		...(ticket !== undefined ? { ticket } : {}),
+		...(factSchema !== undefined ? { fact_schema: factSchema } : {}),
+		...(agreements !== undefined ? { agreements } : {}),
 	};
 }
 
@@ -167,7 +194,15 @@ export function assertFactsResolve(rulesetInput: unknown, facts?: FactMap): Rule
 	const factMap = readFactMap(facts);
 	for (const rule of ruleset.rules) {
 		for (const path of referencedFactPaths(rule.when)) {
-			lookupFact(factMap, path, `rule "${rule.id}"`);
+			const value = lookupFact(factMap, path, `rule "${rule.id}"`);
+			assertFactType(value, ruleset.fact_schema?.[path.join('.')], path.join('.'));
+		}
+	}
+	if (ruleset.fact_schema) {
+		for (const [path, entry] of Object.entries(ruleset.fact_schema)) {
+			if (!entry.required) continue;
+			const value = lookupFact(factMap, path.split('.'), 'fact_schema');
+			assertFactType(value, entry, path);
 		}
 	}
 	return ruleset;
@@ -186,12 +221,25 @@ export function evaluateRules(
 
 	for (const rule of ruleset.rules) {
 		// First true rule wins. Later rules are not consulted.
-		if (evaluateCondition(rule.when, answers, factMap, thresholds, `rule "${rule.id}"`, 0)) {
-			return materialize(rule.action, answers, factMap, thresholds, rule.id, confidenceFor(rule.when, answers));
+		if (evaluateCondition(rule.when, answers, factMap, thresholds, ruleset.fact_schema, `rule "${rule.id}"`, 0)) {
+			return applyAgreements(
+				ruleset,
+				answers,
+				factMap,
+				materialize(
+					rule.action,
+					answers,
+					factMap,
+					thresholds,
+					rule.id,
+					confidenceFor(rule.when, answers),
+					contributionsFor(rule.when, answers, factMap, thresholds, ruleset.fact_schema, `rule "${rule.id}"`),
+				),
+			);
 		}
 	}
 
-	return materialize(ruleset.default_action, answers, factMap, thresholds, null, 0);
+	return materialize(ruleset.default_action, answers, factMap, thresholds, null, 0, []);
 }
 
 /**
@@ -216,8 +264,8 @@ export function decideFromFacts(
 
 	for (const rule of ruleset.rules) {
 		if (referencedQuestions(rule.when).length > 0) return null;
-		if (evaluateCondition(rule.when, noAnswers, factMap, thresholds, `rule "${rule.id}"`, 0)) {
-			return materialize(rule.action, noAnswers, factMap, thresholds, rule.id, confidenceFor(rule.when, noAnswers));
+		if (evaluateCondition(rule.when, noAnswers, factMap, thresholds, ruleset.fact_schema, `rule "${rule.id}"`, 0)) {
+			return materialize(rule.action, noAnswers, factMap, thresholds, rule.id, confidenceFor(rule.when, noAnswers), []);
 		}
 	}
 	return null;
@@ -328,11 +376,12 @@ function lookupFact(facts: FactMap, path: string[], ruleLabel: string): unknown 
  * `confidence` field.
  *
  * Choice and score prefer the server's `confidence`. When that field is
- * absent, choice uses the probability of the selected option, then the
- * maximum probability. Score uses the maximum level probability.
- * Noul answers have no separate confidence. Their contribution is
- * decisiveness, `abs(noul - 0.5) * 2`: 0.5 contributes 0 and 0 or 1
- * contributes 1. That is uncertainty, not the yes-probability itself.
+ * absent, choice uses the probability of the selected label, and score uses
+ * the probability of the selected level. A missing label does not fall back
+ * to the maximum probability in the map. Noul answers have no separate
+ * confidence. Their contribution is decisiveness, `abs(noul - 0.5) * 2`:
+ * 0.5 contributes 0 and 0 or 1 contributes 1. That is a margin, not a
+ * calibrated probability, and it does not open the gate.
  * Returns undefined when none of those signals exist.
  */
 export function bestEffortConfidence(answer: AnswerView): number | undefined {
@@ -343,15 +392,14 @@ export function bestEffortConfidence(answer: AnswerView): number | undefined {
 		return Math.abs(answer.noul - 0.5) * 2;
 	}
 	const probabilities = answer.probabilities;
-	if (probabilities) {
-		if (answer.type === 'choice' && answer.choice !== undefined) {
-			const selected = probabilities[answer.choice];
-			if (typeof selected === 'number' && Number.isFinite(selected)) return selected;
-		}
-		const values = Object.values(probabilities).filter(
-			(value): value is number => typeof value === 'number' && Number.isFinite(value),
-		);
-		if (values.length > 0) return Math.max(...values);
+	if (!probabilities) return undefined;
+	if (answer.type === 'choice' && answer.choice !== undefined) {
+		const selected = probabilities[answer.choice];
+		return typeof selected === 'number' && Number.isFinite(selected) ? selected : undefined;
+	}
+	if (answer.type === 'score' && answer.score !== undefined) {
+		const selected = probabilities[String(answer.score)];
+		return typeof selected === 'number' && Number.isFinite(selected) ? selected : undefined;
 	}
 	return undefined;
 }
@@ -361,6 +409,7 @@ function evaluateCondition(
 	answers: Record<string, AnswerView>,
 	facts: FactMap,
 	thresholds: ThresholdMap,
+	factSchema: Ruleset['fact_schema'],
 	ruleLabel: string,
 	depth: number,
 ): boolean {
@@ -370,19 +419,19 @@ function evaluateCondition(
 	if (condition.kind === 'all') {
 		let matched = true;
 		for (const child of condition.conditions) {
-			if (!evaluateCondition(child, answers, facts, thresholds, ruleLabel, depth + 1)) matched = false;
+			if (!evaluateCondition(child, answers, facts, thresholds, factSchema, ruleLabel, depth + 1)) matched = false;
 		}
 		return matched;
 	}
 	if (condition.kind === 'any') {
 		let matched = false;
 		for (const child of condition.conditions) {
-			if (evaluateCondition(child, answers, facts, thresholds, ruleLabel, depth + 1)) matched = true;
+			if (evaluateCondition(child, answers, facts, thresholds, factSchema, ruleLabel, depth + 1)) matched = true;
 		}
 		return matched;
 	}
 	if (condition.kind === 'fact') {
-		return evaluateFactPredicate(condition, facts, thresholds, ruleLabel);
+		return evaluateFactPredicate(condition, facts, thresholds, factSchema, ruleLabel);
 	}
 	return evaluatePredicate(condition.question, condition.operators, answers, thresholds, ruleLabel);
 }
@@ -391,9 +440,11 @@ function evaluateFactPredicate(
 	condition: Extract<Condition, { kind: 'fact' }>,
 	facts: FactMap,
 	thresholds: ThresholdMap,
+	factSchema: Ruleset['fact_schema'],
 	ruleLabel: string,
 ): boolean {
 	const actual = lookupFact(facts, condition.path, ruleLabel);
+	assertFactType(actual, factSchema?.[condition.fact], condition.fact);
 	let matched = true;
 	for (const operator of condition.operators) {
 		if (!evaluateFactOperator(operator, actual, condition.fact, thresholds, ruleLabel)) matched = false;
@@ -425,24 +476,10 @@ function evaluateFactOperator(
 		const found = actual.includes(operator.value);
 		return operator.op === 'contains' ? found : !found;
 	}
-	if (typeof actual !== 'number' || !Number.isFinite(actual)) {
-		throw new RulesError(`${label} needs a finite number. Received ${describeValue(actual)}.`);
-	}
 	// Every other operator returned above.
 	const numeric = operator as Extract<FactOperator, { op: 'gte' | 'gt' | 'lte' | 'lt' }>;
-	const expected = resolveThreshold(numeric.value, thresholds, label);
-	switch (numeric.op) {
-		case 'gte':
-			return actual >= expected;
-		case 'gt':
-			return actual > expected;
-		case 'lte':
-			return actual <= expected;
-		case 'lt':
-			return actual < expected;
-		default:
-			return assertNever(numeric.op);
-	}
+	const compared = compareOrdered(numeric.op, actual, numeric.value, thresholds, label);
+	return compared;
 }
 
 /**
@@ -517,6 +554,8 @@ export type TraceNode =
 export interface RuleTrace {
 	id: string;
 	matched: boolean;
+	/** True when this rule was also true and an earlier rule won. It did not apply. */
+	did_not_apply?: boolean;
 	/** Set when this rule could not be evaluated, for example a missing answer or fact. */
 	error?: string;
 	when?: TraceNode;
@@ -524,6 +563,8 @@ export interface RuleTrace {
 
 export interface EvaluationTrace {
 	rules: RuleTrace[];
+	/** Later rules that were also true. Always present, and empty when no rule won or evaluation threw. */
+	also_matched: string[];
 	/** What evaluateRules returns. Absent when evaluation throws, with the message in `error`. */
 	decision?: EvaluationResult;
 	error?: string;
@@ -548,17 +589,35 @@ export function traceRules(
 
 	const rules = ruleset.rules.map((rule): RuleTrace => {
 		try {
-			const when = traceCondition(rule.when, answers, factMap, thresholds, `rule "${rule.id}"`);
+			const when = traceCondition(rule.when, answers, factMap, thresholds, ruleset.fact_schema, `rule "${rule.id}"`);
 			return { id: rule.id, matched: when.matched, when };
 		} catch (error) {
 			return { id: rule.id, matched: false, error: error instanceof Error ? error.message : String(error) };
 		}
 	});
+	let decision: EvaluationResult | undefined;
+	let error: string | undefined;
 	try {
-		return { rules, decision: evaluateRules(rulesetInput, answers, thresholdOverrides, facts) };
-	} catch (error) {
-		return { rules, error: error instanceof Error ? error.message : String(error) };
+		decision = evaluateRules(rulesetInput, answers, thresholdOverrides, facts);
+	} catch (caught) {
+		error = caught instanceof Error ? caught.message : String(caught);
 	}
+	const also_matched: string[] = [];
+	const winner = decision?.matched_rule;
+	if (decision && winner) {
+		let past = false;
+		for (const rule of rules) {
+			if (!past) {
+				if (rule.id === winner) past = true;
+				continue;
+			}
+			if (rule.matched && rule.error === undefined) {
+				rule.did_not_apply = true;
+				also_matched.push(rule.id);
+			}
+		}
+	}
+	return error !== undefined ? { rules, also_matched, error } : { rules, also_matched, decision };
 }
 
 function traceCondition(
@@ -566,16 +625,20 @@ function traceCondition(
 	answers: Record<string, AnswerView>,
 	facts: FactMap,
 	thresholds: ThresholdMap,
+	factSchema: Ruleset['fact_schema'],
 	ruleLabel: string,
 ): TraceNode {
 	if (condition.kind === 'all' || condition.kind === 'any') {
-		const children = condition.conditions.map((child) => traceCondition(child, answers, facts, thresholds, ruleLabel));
+		const children = condition.conditions.map((child) =>
+			traceCondition(child, answers, facts, thresholds, factSchema, ruleLabel),
+		);
 		return condition.kind === 'all'
 			? { kind: 'all', matched: children.every((child) => child.matched), children }
 			: { kind: 'any', matched: children.some((child) => child.matched), children };
 	}
 	if (condition.kind === 'fact') {
 		const value = lookupFact(facts, condition.path, ruleLabel);
+		assertFactType(value, factSchema?.[condition.fact], condition.fact);
 		const checks = condition.operators.map((operator) => ({
 			...describeOperand(operator, thresholds),
 			matched: evaluateFactOperator(operator, value, condition.fact, thresholds, ruleLabel),
@@ -604,6 +667,7 @@ function describeOperand(operator: Operator | FactOperator, thresholds: Threshol
 	const value = operator.value;
 	if (value !== null && typeof value === 'object') {
 		if (value.kind === 'number') return { op: operator.op, expected: value.value };
+		if (value.kind === 'instant') return { op: operator.op, expected: value.ms };
 		return { op: operator.op, expected: thresholds[value.name], threshold: value.name };
 	}
 	return { op: operator.op, expected: value };
@@ -760,6 +824,7 @@ function materialize(
 	thresholds: ThresholdMap,
 	matchedRule: string | null,
 	confidence: number,
+	contributions: QuestionContribution[],
 ): EvaluationResult {
 	const target = renderTemplate(action.target, answers, thresholds, facts);
 	const reason = renderTemplate(action.reason, answers, thresholds, facts);
@@ -769,13 +834,16 @@ function materialize(
 			`${label} rendered an empty target or reason. Check {{answers.<question>.choice}} and {{thresholds.<name>}} placeholders.`,
 		);
 	}
+	const margin = roundConfidence(confidence);
 	return {
 		action: action.type,
 		target,
 		reason,
 		gate: action.gate,
 		matched_rule: matchedRule,
-		confidence: roundConfidence(confidence),
+		confidence: margin,
+		margin,
+		contributions,
 	};
 }
 
@@ -984,7 +1052,7 @@ function readFactCondition(input: Record<string, unknown>, path: string): Condit
 			}
 			operators.push({ op: name, values: value.map((entry, index) => readFactOperand(entry, `${opPath}[${index}]`)) });
 		} else {
-			operators.push({ op: name, value: readNumericOperand(value, opPath) });
+			operators.push({ op: name, value: readOrderedOperand(value, opPath) });
 		}
 	}
 	return { kind: 'fact', fact: input.fact, path: segments, operators };
@@ -1086,7 +1154,252 @@ function assertAnswerMap(answers: Record<string, AnswerView>): void {
 		if (!answer || (answer.type !== 'choice' && answer.type !== 'noul' && answer.type !== 'score')) {
 			throw new RulesError(`Answer "${key}" must be a normalized choice, noul, or score.`);
 		}
+		if (answer.noul !== undefined) assertUnitInterval(answer.noul, `Answer "${key}" noul`);
+		if (answer.confidence !== undefined) assertUnitInterval(answer.confidence, `Answer "${key}" confidence`);
+		if (answer.probabilities) {
+			for (const [label, probability] of Object.entries(answer.probabilities)) {
+				assertUnitInterval(probability, `Answer "${key}" probabilities.${label}`);
+			}
+		}
 	}
+}
+
+function assertUnitInterval(value: unknown, path: string): void {
+	if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) {
+		throw new RulesError(`${path} must be a finite number from 0 to 1. Received ${describeValue(value)}.`);
+	}
+}
+
+/** Epoch milliseconds, or undefined when the text is not an instant with an offset. */
+export function parseInstant(text: string): number | undefined {
+	const match = INSTANT_STRING.exec(text.trim());
+	if (!match) return undefined;
+	// Date.parse keeps millisecond precision. Extra fractional digits are truncated, not ordered as text.
+	const normalized = match[1].replace(/\.(\d{3})\d+/, '.$1');
+	const ms = Date.parse(normalized);
+	return Number.isFinite(ms) ? ms : undefined;
+}
+
+function readOptionalText(value: unknown, path: string): string | undefined {
+	if (value === undefined) return undefined;
+	if (typeof value !== 'string' || value.trim() === '') {
+		throw new RulesError(`${path} must be a non-empty string.`);
+	}
+	return value.trim();
+}
+
+function readFactSchema(input: unknown): Record<string, FactSchemaEntry> | undefined {
+	if (input === undefined) return undefined;
+	if (!isPlainObject(input)) {
+		throw new RulesError(`rules.fact_schema must be an object of fact paths. Received ${describeValue(input)}.`);
+	}
+	const schema: Record<string, FactSchemaEntry> = {};
+	for (const [fact, raw] of Object.entries(input)) {
+		assertFactPath(fact, `rules.fact_schema key "${fact}"`);
+		if (!isPlainObject(raw)) {
+			throw new RulesError(`rules.fact_schema.${fact} must be an object with type and required.`);
+		}
+		assertKnownKeys(raw, new Set(['type', 'required']), `rules.fact_schema.${fact}`);
+		if (typeof raw.type !== 'string' || !FACT_SCHEMA_TYPES.has(raw.type as FactSchemaType)) {
+			throw new RulesError(
+				`rules.fact_schema.${fact}.type must be one of: ${[...FACT_SCHEMA_TYPES].join(', ')}. Received ${JSON.stringify(raw.type)}.`,
+			);
+		}
+		if (typeof raw.required !== 'boolean') {
+			throw new RulesError(`rules.fact_schema.${fact}.required must be a boolean.`);
+		}
+		schema[fact] = { type: raw.type as FactSchemaType, required: raw.required };
+	}
+	return schema;
+}
+
+function readAgreements(input: unknown): Agreement[] | undefined {
+	if (input === undefined) return undefined;
+	if (!Array.isArray(input)) {
+		throw new RulesError(`rules.agreements must be an array. Received ${describeValue(input)}.`);
+	}
+	return input.map((entry, index) => {
+		const path = `rules.agreements[${index}]`;
+		if (!isPlainObject(entry)) throw new RulesError(`${path} must be an object with question, fact, and relation.`);
+		assertKnownKeys(entry, new Set(['question', 'fact', 'relation']), path);
+		if (typeof entry.question !== 'string' || entry.question === '' || /\s/.test(entry.question)) {
+			throw new RulesError(`${path}.question must be a non-empty question id without spaces.`);
+		}
+		if (typeof entry.fact !== 'string') throw new RulesError(`${path}.fact must be a fact path.`);
+		assertFactPath(entry.fact, `${path}.fact`);
+		if (entry.relation !== 'eq' && entry.relation !== 'inverse') {
+			throw new RulesError(`${path}.relation must be "eq" or "inverse".`);
+		}
+		return { question: entry.question, fact: entry.fact, relation: entry.relation };
+	});
+}
+
+function assertFactPath(fact: string, path: string): void {
+	const segments = fact.split('.');
+	if (segments.length === 0 || segments.some((segment) => !FACT_SEGMENT.test(segment) || RESERVED_NAMES.has(segment))) {
+		throw new RulesError(
+			`${path} "${fact}" is not a fact path. Each dotted segment starts with a letter or underscore and uses letters, digits, underscores, or hyphens.`,
+		);
+	}
+}
+
+function assertFactType(value: unknown, entry: FactSchemaEntry | undefined, path: string): void {
+	if (!entry || factMatchesType(value, entry.type)) return;
+	throw new RulesError(`Fact "${path}" is declared ${entry.type}. Received ${received(value)}.`);
+}
+
+function factMatchesType(value: unknown, type: FactSchemaType): boolean {
+	switch (type) {
+		case 'string':
+			return typeof value === 'string';
+		case 'number':
+			return typeof value === 'number' && Number.isFinite(value);
+		case 'boolean':
+			return typeof value === 'boolean';
+		case 'null':
+			return value === null;
+		case 'instant':
+			return typeof value === 'string' && parseInstant(value) !== undefined;
+		case 'array':
+			return Array.isArray(value) && value.every(isFactValue);
+		default:
+			return assertNever(type);
+	}
+}
+
+function received(value: unknown): string {
+	if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || value === null) {
+		return JSON.stringify(value);
+	}
+	return describeValue(value);
+}
+
+/**
+ * Ordered fact compare. An instant operand requires an instant fact, and a
+ * number operand rejects an instant fact. The two are not coerced.
+ */
+function compareOrdered(
+	op: 'gte' | 'gt' | 'lte' | 'lt',
+	actual: unknown,
+	ordered: OrderedValue,
+	thresholds: ThresholdMap,
+	label: string,
+): boolean {
+	const actualInstant = typeof actual === 'string' ? parseInstant(actual) : undefined;
+	if (ordered.kind === 'instant') {
+		if (typeof actual === 'number') {
+			throw new RulesError(`${label} compares an instant with a number. Instants are not coerced from numbers.`);
+		}
+		if (actualInstant === undefined) {
+			throw new RulesError(`${label} needs an ISO-8601 instant with a timezone offset. Received ${describeValue(actual)}.`);
+		}
+		return compareNumbers(op, actualInstant, ordered.ms);
+	}
+	if (actualInstant !== undefined) {
+		throw new RulesError(`${label} compares an instant fact with a number. Use an ISO-8601 instant as the operand, or compare two numbers.`);
+	}
+	if (typeof actual !== 'number' || !Number.isFinite(actual)) {
+		throw new RulesError(`${label} needs a finite number. Received ${describeValue(actual)}.`);
+	}
+	return compareNumbers(op, actual, resolveThreshold(ordered, thresholds, label));
+}
+
+function compareNumbers(op: 'gte' | 'gt' | 'lte' | 'lt', actual: number, expected: number): boolean {
+	switch (op) {
+		case 'gte':
+			return actual >= expected;
+		case 'gt':
+			return actual > expected;
+		case 'lte':
+			return actual <= expected;
+		case 'lt':
+			return actual < expected;
+		default:
+			return assertNever(op);
+	}
+}
+
+/** A fact ordered operand: a number, a threshold name, or an ISO-8601 instant. */
+function readOrderedOperand(value: unknown, path: string): OrderedValue {
+	if (typeof value === 'string') {
+		const ms = parseInstant(value);
+		if (ms !== undefined) return { kind: 'instant', ms };
+	}
+	return readNumericOperand(value, path);
+}
+
+/**
+ * Margins for the questions a winning rule references. `satisfied` is true
+ * only on a matched branch of a matched node. An unmatched sibling of `any`
+ * is recorded and is not satisfied. A margin does not open the gate.
+ */
+function contributionsFor(
+	condition: Condition,
+	answers: Record<string, AnswerView>,
+	facts: FactMap,
+	thresholds: ThresholdMap,
+	factSchema: Ruleset['fact_schema'],
+	ruleLabel: string,
+): QuestionContribution[] {
+	const found: QuestionContribution[] = [];
+	walk(condition, true, 0);
+	return found;
+
+	function walk(node: Condition, reachable: boolean, depth: number): void {
+		const matched = evaluateCondition(node, answers, facts, thresholds, factSchema, ruleLabel, depth);
+		const satisfied = reachable && matched;
+		if (node.kind === 'predicate') {
+			const answer = answers[node.question];
+			const margin = answer ? roundConfidence(bestEffortConfidence(answer) ?? 0) : 0;
+			found.push({ question: node.question, margin, satisfied });
+			return;
+		}
+		if (node.kind === 'all' || node.kind === 'any') {
+			for (const child of node.conditions) walk(child, satisfied, depth + 1);
+		}
+	}
+}
+
+/**
+ * When the decision would open the gate and a declared agreement disagrees,
+ * force a hold. An agreement never opens a gate. Incomparable shapes do not
+ * hold. A missing fact is an error when the question was answered.
+ */
+function applyAgreements(
+	ruleset: Ruleset,
+	answers: Record<string, AnswerView>,
+	facts: FactMap,
+	decision: EvaluationResult,
+): EvaluationResult {
+	if (decision.gate !== false) return decision;
+	for (const agreement of ruleset.agreements ?? []) {
+		const answer = answers[agreement.question];
+		if (!answer) continue;
+		const fact = lookupFact(facts, agreement.fact.split('.'), `Agreement on question "${agreement.question}"`);
+		const agrees = agreementAgrees(answer, fact, agreement.relation);
+		if (agrees === undefined || agrees) continue;
+		return {
+			...decision,
+			gate: true,
+			reason: `Held because question "${agreement.question}" disagrees with fact "${agreement.fact}".`,
+		};
+	}
+	return decision;
+}
+
+/** True when the answer restates the fact the way `relation` requires. Undefined when the shapes do not correspond. */
+function agreementAgrees(answer: AnswerView, fact: unknown, relation: 'eq' | 'inverse'): boolean | undefined {
+	let same: boolean | undefined;
+	if (typeof fact === 'boolean' && answer.type === 'noul' && typeof answer.noul === 'number' && Number.isFinite(answer.noul)) {
+		same = answer.noul >= 0.5 === fact;
+	} else if (typeof fact === 'string' && answer.type === 'choice' && typeof answer.choice === 'string') {
+		same = answer.choice === fact;
+	} else if (typeof fact === 'number' && Number.isFinite(fact) && answer.type === 'score' && typeof answer.score === 'number') {
+		same = answer.score === fact;
+	} else {
+		return undefined;
+	}
+	return relation === 'eq' ? same : !same;
 }
 
 function assertIdentifier(name: string, path: string): void {

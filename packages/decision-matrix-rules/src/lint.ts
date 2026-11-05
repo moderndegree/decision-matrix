@@ -1,7 +1,7 @@
 import { referencedQuestions, referencedThresholds, requiresFact, validateRuleset } from './engine';
 import { RulesError } from './errors';
 import { isPlainObject } from './object';
-import type { Condition, FactOperator, FactValue, Operator, Ruleset, ThresholdRef } from './types';
+import type { ActionSpec, Condition, FactOperator, FactSchemaType, FactValue, Operator, OrderedValue, Ruleset } from './types';
 
 /**
  * Static checks on a ruleset. Nothing is evaluated and no server is called.
@@ -32,6 +32,11 @@ export interface LintOptions {
 	/** When given, question ids, types, and choice labels are checked against it. */
 	questions?: Record<string, LintQuestion>;
 	thresholdOverrides?: Record<string, number>;
+	/**
+	 * When true, a ruleset that can open the gate must name an owner and a ticket.
+	 * Off unless the caller asks, so a ruleset without those fields still evaluates.
+	 */
+	governance?: boolean;
 }
 
 export function lintRuleset(input: unknown, options: LintOptions = {}): LintFinding[] {
@@ -61,6 +66,18 @@ export function lintRuleset(input: unknown, options: LintOptions = {}): LintFind
 			'default_action has gate false, so an event that no rule recognizes proceeds. Hold by default when a miss should not proceed.',
 		);
 	}
+	const canOpen = ruleset.rules.some((rule) => !rule.action.gate) || !ruleset.default_action.gate;
+	if (ruleset.rules.some((rule) => !rule.action.gate) && !ruleset.default_action.gate) {
+		add(
+			'error',
+			'open-without-closed-default',
+			'A rule opens the gate, and default_action.gate is false. Hold by default so an event that no rule recognizes does not proceed.',
+		);
+	}
+	if (options.governance && canOpen) {
+		if (!ruleset.owner) add('error', 'missing-owner', 'This ruleset can open the gate and has no owner.');
+		if (!ruleset.ticket) add('error', 'missing-ticket', 'This ruleset can open the gate and has no ticket.');
+	}
 
 	let firstModelRule: string | undefined;
 	ruleset.rules.forEach((rule, index) => {
@@ -83,6 +100,7 @@ export function lintRuleset(input: unknown, options: LintOptions = {}): LintFind
 				rule.id,
 			);
 		}
+		let shadowed = false;
 		for (let earlier = 0; earlier < index; earlier++) {
 			const shadow = ruleset.rules[earlier]!;
 			if (implies(rule.when, shadow.when, thresholds)) {
@@ -92,12 +110,30 @@ export function lintRuleset(input: unknown, options: LintOptions = {}): LintFind
 					`Rule "${rule.id}" can never match: "${shadow.id}" comes first and matches whenever "${rule.id}" would.`,
 					rule.id,
 				);
+				shadowed = true;
+				break;
+			}
+		}
+		// A fully shadowed rule already cannot win. Do not also warn that it overlaps.
+		if (!shadowed) {
+			for (let earlier = 0; earlier < index; earlier++) {
+				const prior = ruleset.rules[earlier]!;
+				if (!actionsDisagree(rule.action, prior.action)) continue;
+				if (!canOverlap(rule.when, prior.when, thresholds)) continue;
+				add(
+					'warning',
+					'overlap',
+					`Rule "${rule.id}" can be true together with "${prior.id}" and they disagree on the action.`,
+					rule.id,
+				);
 				break;
 			}
 		}
 	});
 
 	if (options.questions) lintQuestions(ruleset, options.questions, add);
+	if (ruleset.fact_schema) lintFactSchema(ruleset, add);
+	lintAgreements(ruleset, options, add);
 
 	const used = referencedThresholds(ruleset);
 	for (const name of Object.keys(ruleset.thresholds)) {
@@ -165,6 +201,98 @@ function lintQuestions(
 	for (const question of Object.keys(questions)) {
 		if (!referenced.has(question)) {
 			add('info', 'unused-question', `Question "${question}" is asked but no rule reads it. It costs tokens on every call.`);
+		}
+	}
+}
+
+function actionsDisagree(left: ActionSpec, right: ActionSpec): boolean {
+	return left.type !== right.type || left.target !== right.target || left.gate !== right.gate;
+}
+
+function lintFactSchema(
+	ruleset: Ruleset,
+	add: (severity: LintSeverity, code: string, message: string, rule?: string) => void,
+): void {
+	const schema = ruleset.fact_schema ?? {};
+	const referenced = new Set<string>();
+	for (const rule of ruleset.rules) {
+		walkFacts(rule.when, (fact, operators) => {
+			referenced.add(fact);
+			const entry = schema[fact];
+			if (!entry) {
+				add('error', 'unknown-fact', `Rule "${rule.id}" reads fact "${fact}", which is not in fact_schema.`, rule.id);
+				return;
+			}
+			for (const operator of operators) {
+				if (!factOperatorFits(entry.type, operator)) {
+					add(
+						'error',
+						'fact-type',
+						`Rule "${rule.id}" uses ${operator.op} on "${fact}", which is declared ${entry.type}.`,
+						rule.id,
+					);
+				}
+			}
+		});
+	}
+	for (const path of Object.keys(schema)) {
+		if (!referenced.has(path)) add('info', 'unused-fact', `Fact schema path "${path}" is not read by any rule.`);
+	}
+}
+
+function walkFacts(condition: Condition, visit: (fact: string, operators: FactOperator[]) => void): void {
+	if (condition.kind === 'fact') visit(condition.fact, condition.operators);
+	else if (condition.kind === 'all' || condition.kind === 'any') {
+		for (const child of condition.conditions) walkFacts(child, visit);
+	}
+}
+
+function factOperatorFits(type: FactSchemaType, operator: FactOperator): boolean {
+	if (type === 'array') return operator.op === 'contains' || operator.op === 'not_contains';
+	if (type === 'instant') {
+		if (operator.op === 'gte' || operator.op === 'gt' || operator.op === 'lte' || operator.op === 'lt') return operator.value.kind === 'instant';
+		if (operator.op === 'eq' || operator.op === 'neq') return typeof operator.value === 'string';
+		if (operator.op === 'in' || operator.op === 'not_in') return operator.values.every((value) => typeof value === 'string');
+		return false;
+	}
+	if (type === 'number') {
+		if (operator.op === 'gte' || operator.op === 'gt' || operator.op === 'lte' || operator.op === 'lt') return operator.value.kind !== 'instant';
+		return scalarFits(type, operator);
+	}
+	if (type === 'string' || type === 'boolean' || type === 'null') return scalarFits(type, operator);
+	return false;
+}
+
+function scalarFits(type: 'string' | 'number' | 'boolean' | 'null', operator: FactOperator): boolean {
+	const fits = (value: FactValue) => value === null || (type === 'null' ? false : typeof value === type);
+	if (operator.op === 'eq' || operator.op === 'neq') return fits(operator.value);
+	if (operator.op === 'in' || operator.op === 'not_in') return operator.values.every(fits);
+	return false;
+}
+
+function lintAgreements(
+	ruleset: Ruleset,
+	options: LintOptions,
+	add: (severity: LintSeverity, code: string, message: string, rule?: string) => void,
+): void {
+	for (const agreement of ruleset.agreements ?? []) {
+		const entry = ruleset.fact_schema?.[agreement.fact];
+		if (entry && entry.type !== 'boolean' && entry.type !== 'string' && entry.type !== 'number') {
+			add(
+				'warning',
+				'agreement-shape',
+				`Agreement on fact "${agreement.fact}" is ${entry.type}, which has no corresponding model answer.`,
+			);
+		}
+		const question = options.questions?.[agreement.question];
+		if (!entry || !question || typeof question.type !== 'string') continue;
+		const expected = entry.type === 'boolean' ? 'noul' : entry.type === 'string' ? 'choice' : entry.type === 'number' ? 'score' : undefined;
+		if (expected && question.type !== expected) {
+			add(
+				'warning',
+				'agreement-shape',
+				`Agreement pairs ${question.type} question "${agreement.question}" with ${entry.type} fact "${agreement.fact}".`,
+			);
 		}
 	}
 }
@@ -271,7 +399,7 @@ function atomsOf(condition: Extract<Condition, { kind: 'predicate' | 'fact' }>, 
 		} else if (op === 'contains' || op === 'not_contains') {
 			atoms.push({ subject: base, kind: op, value: (operator as { value: FactValue }).value });
 		} else {
-			const n = resolve((operator as { value: ThresholdRef }).value, thresholds);
+			const n = resolve((operator as { value: OrderedValue }).value, thresholds);
 			if (n === undefined) return null;
 			const confidence = op === 'confidence_gte' || op === 'confidence_lt';
 			const numericOp = op === 'confidence_gte' ? 'gte' : op === 'confidence_lt' ? 'lt' : op;
@@ -302,7 +430,82 @@ function atomImplies(have: Atom, needed: Atom): boolean {
 	return false;
 }
 
-function resolve(ref: ThresholdRef, thresholds: Record<string, number>): number | undefined {
+function resolve(ref: OrderedValue, thresholds: Record<string, number>): number | undefined {
 	if (ref.kind === 'number') return ref.value;
+	if (ref.kind === 'instant') return ref.ms;
 	return Object.prototype.hasOwnProperty.call(thresholds, ref.name) ? thresholds[ref.name] : undefined;
+}
+
+/**
+ * True when some input can satisfy both conditions. Sound but not complete:
+ * unresolved thresholds or too many branches return false, which misses a
+ * warning rather than raising a false one. A number mixed with membership
+ * or contains on the same subject is a contradiction.
+ */
+function canOverlap(left: Condition, right: Condition, thresholds: Record<string, number>): boolean {
+	const leftBranches = branchesOf(left, thresholds);
+	const rightBranches = branchesOf(right, thresholds);
+	if (leftBranches === null || rightBranches === null) return false;
+	return leftBranches.some((one) => rightBranches.some((other) => branchCompatible(one, other)));
+}
+
+function branchCompatible(left: Atom[], right: Atom[]): boolean {
+	const subjects = new Set([...left, ...right].map((atom) => atom.subject));
+	for (const subject of subjects) {
+		const atoms = [...left, ...right].filter((atom) => atom.subject === subject);
+		if (!subjectSatisfiable(atoms)) return false;
+	}
+	return true;
+}
+
+function subjectSatisfiable(atoms: Atom[]): boolean {
+	const nums = atoms.filter((atom): atom is Extract<Atom, { kind: 'num' }> => atom.kind === 'num');
+	const members = atoms.filter((atom): atom is Extract<Atom, { kind: 'in' | 'not_in' }> => atom.kind === 'in' || atom.kind === 'not_in');
+	const contains = atoms.filter(
+		(atom): atom is Extract<Atom, { kind: 'contains' | 'not_contains' }> => atom.kind === 'contains' || atom.kind === 'not_contains',
+	);
+	const used = Number(nums.length > 0) + Number(members.length > 0) + Number(contains.length > 0);
+	if (used > 1) return false;
+	if (nums.length > 0) return intervalOpen(nums);
+	if (members.length > 0) return membersOpen(members);
+	if (contains.length > 0) return containsOpen(contains);
+	return true;
+}
+
+function intervalOpen(atoms: Array<Extract<Atom, { kind: 'num' }>>): boolean {
+	let lo: { n: number; open: boolean } | undefined;
+	let hi: { n: number; open: boolean } | undefined;
+	for (const atom of atoms) {
+		if (atom.op === 'gte' || atom.op === 'gt') {
+			const open = atom.op === 'gt';
+			if (!lo || atom.n > lo.n || (atom.n === lo.n && open && !lo.open)) lo = { n: atom.n, open };
+		} else {
+			const open = atom.op === 'lt';
+			if (!hi || atom.n < hi.n || (atom.n === hi.n && open && !hi.open)) hi = { n: atom.n, open };
+		}
+	}
+	if (lo && hi) {
+		if (lo.n > hi.n) return false;
+		if (lo.n === hi.n && (lo.open || hi.open)) return false;
+	}
+	return true;
+}
+
+function membersOpen(atoms: Array<Extract<Atom, { kind: 'in' | 'not_in' }>>): boolean {
+	const ins = atoms.filter((atom) => atom.kind === 'in');
+	const outs = atoms.filter((atom) => atom.kind === 'not_in');
+	// Exclusions alone do not name a finite domain, so they do not prove an overlap.
+	if (ins.length === 0) return outs.length === 0;
+	let allowed = ins[0]!.values.slice();
+	for (const atom of ins.slice(1)) allowed = allowed.filter((value) => atom.values.some((other) => other === value));
+	for (const atom of outs) allowed = allowed.filter((value) => !atom.values.some((other) => other === value));
+	return allowed.length > 0;
+}
+
+function containsOpen(atoms: Array<Extract<Atom, { kind: 'contains' | 'not_contains' }>>): boolean {
+	for (const atom of atoms) {
+		if (atom.kind !== 'contains') continue;
+		if (atoms.some((other) => other.kind === 'not_contains' && other.value === atom.value)) return false;
+	}
+	return true;
 }

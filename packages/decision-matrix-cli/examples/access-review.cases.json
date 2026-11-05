@@ -79,6 +79,76 @@
       "name": "a grant without owner approval is not kept",
       "facts": { "grant": { "owner_approved": false } },
       "expect": { "matched_rule": null, "gate": true }
+    },
+    {
+      "name": "principal.active of the wrong type is an error",
+      "facts": { "principal": { "active": 1 } },
+      "expect": { "error": "fact \"principal.active\"" }
+    },
+    {
+      "name": "grant.privileged of the wrong type is an error",
+      "facts": { "grant": { "privileged": 1 } },
+      "expect": { "error": "fact \"grant.privileged\"" }
+    },
+    {
+      "name": "grant.days_since_last_use of the wrong type is an error",
+      "facts": { "grant": { "days_since_last_use": "x" } },
+      "expect": { "error": "fact \"grant.days_since_last_use\"" }
+    },
+    {
+      "name": "principal.type of the wrong type is an error",
+      "facts": { "principal": { "type": 1 } },
+      "expect": { "error": "fact \"principal.type\"" }
+    },
+    {
+      "name": "principal.mfa of the wrong type is an error",
+      "facts": { "principal": { "mfa": "yes" } },
+      "expect": { "error": "fact \"principal.mfa\"" }
+    },
+    {
+      "name": "grant.owner_approved of the wrong type is an error",
+      "facts": { "grant": { "owner_approved": 1 } },
+      "expect": { "error": "fact \"grant.owner_approved\"" }
+    },
+    {
+      "name": "grant.days_since_review of the wrong type is an error",
+      "facts": { "grant": { "days_since_review": "x" } },
+      "expect": { "error": "fact \"grant.days_since_review\"" }
+    },
+    {
+      "name": "a missing principal.active is an error",
+      "omit_facts": ["principal.active"],
+      "expect": { "error": "fact \"principal.active\"" }
+    },
+    {
+      "name": "a missing grant.privileged is an error",
+      "omit_facts": ["grant.privileged"],
+      "expect": { "error": "fact \"grant.privileged\"" }
+    },
+    {
+      "name": "a missing grant.days_since_last_use is an error",
+      "omit_facts": ["grant.days_since_last_use"],
+      "expect": { "error": "fact \"grant.days_since_last_use\"" }
+    },
+    {
+      "name": "a missing principal.type is an error",
+      "omit_facts": ["principal.type"],
+      "expect": { "error": "fact \"principal.type\"" }
+    },
+    {
+      "name": "a missing principal.mfa is an error",
+      "omit_facts": ["principal.mfa"],
+      "expect": { "error": "fact \"principal.mfa\"" }
+    },
+    {
+      "name": "a missing grant.owner_approved is an error",
+      "omit_facts": ["grant.owner_approved"],
+      "expect": { "error": "fact \"grant.owner_approved\"" }
+    },
+    {
+      "name": "a missing grant.days_since_review is an error",
+      "omit_facts": ["grant.days_since_review"],
+      "expect": { "error": "fact \"grant.days_since_review\"" }
     }
   ]
 }

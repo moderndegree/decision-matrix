@@ -1,6 +1,8 @@
 {
   "version": 1,
   "open_gate_requires_facts": true,
+  "owner": "decision-matrix",
+  "ticket": "access-review",
   "default_action": {
     "type": "review",
     "target": "owner",

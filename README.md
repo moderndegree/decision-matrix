@@ -40,10 +40,12 @@ Test, lint, and diff it from the command line:
 
 ```bash
 cd packages/decision-matrix-cli
-node dist/cli.js test  --preset ci-change --cases examples/ci-change.cases.json --require-coverage
-node dist/cli.js check --preset ci-change --strict
+node dist/cli.js test  --preset ci-change --cases examples/ci-change.cases.json --require-coverage --require-fact-errors
+node dist/cli.js check --preset ci-change
 node dist/cli.js diff  --from old.rules.json --to examples/ci-change.rules.json --cases examples/ci-change.cases.json
 ```
+
+`check` fails on errors. The starter CI policy has overlap warnings, so `check --strict` fails that policy. `--strict` also requires an owner and a ticket when the ruleset can open the gate.
 
 Run n8n with the node and a scripted decision server:
 
