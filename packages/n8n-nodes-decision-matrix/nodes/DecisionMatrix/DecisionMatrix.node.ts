@@ -443,8 +443,11 @@ async function evaluateItem(
 
 	// Fail here, before the HTTP call, when the rules JSON is structurally wrong,
 	// a threshold name would not resolve, a script is wrong, or a referenced fact is missing.
+	// The three calls below validate the JSON themselves. The parsed ruleset is
+	// for the receipt and for questions a script cannot open. Passing that
+	// parsed ruleset back in makes when.kind an unknown key.
 	const ruleset = assertThresholdsResolve(rules, thresholdOverrides);
-	assertFactsResolve(ruleset, facts);
+	assertFactsResolve(rules, facts);
 	const program = readScripts(
 		ctx.getNodeParameter('answerWith', itemIndex, 'server'),
 		questionSet,
@@ -452,7 +455,7 @@ async function evaluateItem(
 		questionsParam,
 	);
 
-	const fromFacts = decideFromFacts(ruleset, facts, thresholdOverrides);
+	const fromFacts = decideFromFacts(rules, facts, thresholdOverrides);
 	if (fromFacts) {
 		return buildItemOutput(
 			fromFacts,
@@ -480,7 +483,7 @@ async function evaluateItem(
 	const answers = { ...scriptAnswers, ...systemOne.answers };
 	const rawAnswers: Record<string, unknown> = { ...scriptAnswers, ...systemOne.rawAnswers };
 	systemOne = { ...systemOne, answers, rawAnswers };
-	const evaluation = evaluateRules(ruleset, answers, thresholdOverrides, facts);
+	const evaluation = evaluateRules(rules, answers, thresholdOverrides, facts);
 
 	if (options.failOnNoMatch && evaluation.matched_rule === null) {
 		throw new RulesError(noMatchMessage(evaluation));
