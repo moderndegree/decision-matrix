@@ -73,7 +73,7 @@ describe('thresholds', () => {
 		screen = await type('risk_limit');
 		expect(screen).toContain('Renamed to risk_limit in every rule and case.');
 		expect(screen).toContain('risk_limit       2');
-		expect(screen).toContain('Cases 16/16');
+		expect(screen).toContain('Cases 36/36');
 		setup.renderer.destroy();
 	});
 });
@@ -90,7 +90,7 @@ describe('cases', () => {
 		screen = await type('only the defaults');
 		expect(screen).toContain('Case added.');
 		expect(screen).toContain('✓ only the defaults');
-		expect(screen).toContain('Cases 17/17');
+		expect(screen).toContain('Cases 37/37');
 
 		screen = await press(() => keys.pressKey('e'));
 		expect(screen).toContain('What this case expects');
@@ -155,8 +155,8 @@ describe('questions screen', () => {
 
 		screen = await escape();
 		expect(screen).toContain('Rules · ci-change.rules.json');
-		expect(screen).toContain('Cases 16/16');
-		expect(screen).toContain('lint 0 errors 0 warnings');
+		expect(screen).toContain('Cases 36/36');
+		expect(screen).toContain('lint 0 errors 7 warnings');
 		setup.renderer.destroy();
 	});
 

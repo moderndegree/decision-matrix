@@ -53,6 +53,25 @@ const CORPUS: Array<[string, unknown, boolean]> = [
 	['an empty answer', one({ answers: { q: {} } }), false],
 	['an answer that is a number', one({ answers: { q: 0.5 } }), false],
 	['answers in shorthand', one({ answers: { q: { noul: 0.5 } } }), true],
+	['omit_facts', one({ omit_facts: ['touches_ci'] }), true],
+	['omit_facts as a string', one({ omit_facts: 'touches_ci' }), false],
+	['an omit_facts path with an empty segment', one({ omit_facts: ['a..b'] }), false],
+	[
+		'provenance',
+		{ ...one({}), provenance: { model_id: 'model', temperature: 0, questions_hash: 'abc' } },
+		true,
+	],
+	[
+		'provenance with nulls',
+		{ ...one({}), provenance: { model_id: null, temperature: null, questions_hash: 'abc' } },
+		true,
+	],
+	['provenance missing a key', { ...one({}), provenance: { model_id: 'model', temperature: 0 } }, false],
+	[
+		'provenance with an unknown key',
+		{ ...one({}), provenance: { model_id: 'model', temperature: 0, questions_hash: 'abc', extra: 1 } },
+		false,
+	],
 ];
 
 describe('cases.schema.json', () => {

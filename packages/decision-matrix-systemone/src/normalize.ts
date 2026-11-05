@@ -98,7 +98,7 @@ function normalizeAnswer(key: string, value: unknown): AnswerView {
 	}
 	const type = detectType(key, value);
 	const probabilities = readProbabilityMap(value.probabilities, `${path}.probabilities`);
-	const confidence = readOptionalNumber(value.confidence ?? value.confidence_score, `${path}.confidence`);
+	const confidence = readOptionalNumber(value.confidence ?? value.confidence_score, `${path}.confidence`, true);
 
 	if (type === 'choice') {
 		const choice = readChoice(value, probabilities, path);
@@ -113,6 +113,7 @@ function normalizeAnswer(key: string, value: unknown): AnswerView {
 		const noul = readRequiredNumber(
 			firstDefined(value, ['noul', 'probability', 'yes', 'p']),
 			`${path}.noul`,
+			true,
 			true,
 		);
 		return {
@@ -181,7 +182,7 @@ function readProbabilityMap(value: unknown, path: string): Record<string, number
 	if (isPlainObject(value)) {
 		const map: Record<string, number> = {};
 		for (const [label, probability] of Object.entries(value)) {
-			map[label] = readRequiredNumber(probability, `${path}.${label}`, false);
+			map[label] = readRequiredNumber(probability, `${path}.${label}`, false, true);
 		}
 		return map;
 	}
@@ -196,7 +197,7 @@ function readProbabilityMap(value: unknown, path: string): Record<string, number
 				throw new SystemOneError(`${path}[${index}] is missing a value, label, or choice.`);
 			}
 			const probability = firstDefined(entry, ['probability', 'p', 'score']);
-			map[label] = readRequiredNumber(probability, `${path}[${index}].probability`, false);
+			map[label] = readRequiredNumber(probability, `${path}[${index}].probability`, false, true);
 		});
 		return map;
 	}
@@ -237,14 +238,19 @@ function firstString(source: Record<string, unknown>, keys: string[]): string | 
 	return undefined;
 }
 
-function readOptionalNumber(value: unknown, path: string): number | undefined {
+function readOptionalNumber(value: unknown, path: string, unitInterval = false): number | undefined {
 	if (value === undefined || value === null || value === '') return undefined;
-	return readRequiredNumber(value, path, false);
+	return readRequiredNumber(value, path, false, unitInterval);
 }
 
-function readRequiredNumber(value: unknown, path: string, allowBoolean: boolean): number {
-	if (typeof value === 'number' && Number.isFinite(value)) return value;
-	if (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))) return Number(value);
-	if (allowBoolean && typeof value === 'boolean') return value ? 1 : 0;
-	throw new SystemOneError(`${path} must be a number. Received ${describeValue(value)}.`);
+function readRequiredNumber(value: unknown, path: string, allowBoolean: boolean, unitInterval = false): number {
+	let parsed: number | undefined;
+	if (typeof value === 'number' && Number.isFinite(value)) parsed = value;
+	else if (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))) parsed = Number(value);
+	else if (allowBoolean && typeof value === 'boolean') parsed = value ? 1 : 0;
+	if (parsed === undefined) throw new SystemOneError(`${path} must be a number. Received ${describeValue(value)}.`);
+	if (unitInterval && (parsed < 0 || parsed > 1)) {
+		throw new SystemOneError(`${path} must be a finite number from 0 to 1. Received ${parsed}.`);
+	}
+	return parsed;
 }

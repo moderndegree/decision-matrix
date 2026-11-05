@@ -119,6 +119,106 @@
       "name": "a confident model cannot pass a large change",
       "facts": { "files_changed": 21 },
       "expect": { "matched_rule": null, "gate": true }
+    },
+    {
+      "name": "touches_ci of the wrong type is an error",
+      "facts": { "touches_ci": 1 },
+      "expect": { "error": "fact \"touches_ci\"" }
+    },
+    {
+      "name": "changes_package_scripts of the wrong type is an error",
+      "facts": { "changes_package_scripts": 1 },
+      "expect": { "error": "fact \"changes_package_scripts\"" }
+    },
+    {
+      "name": "new_package_count of the wrong type is an error",
+      "facts": { "new_package_count": "x" },
+      "expect": { "error": "fact \"new_package_count\"" }
+    },
+    {
+      "name": "docs_only of the wrong type is an error",
+      "facts": { "docs_only": 1 },
+      "expect": { "error": "fact \"docs_only\"" }
+    },
+    {
+      "name": "author_is_dependency_bot of the wrong type is an error",
+      "facts": { "author_is_dependency_bot": "yes" },
+      "expect": { "error": "fact \"author_is_dependency_bot\"" }
+    },
+    {
+      "name": "dependency_update_type of the wrong type is an error",
+      "facts": { "dependency_update_type": true },
+      "expect": { "error": "fact \"dependency_update_type\"" }
+    },
+    {
+      "name": "diff_truncated of the wrong type is an error",
+      "facts": { "diff_truncated": "no" },
+      "expect": { "error": "fact \"diff_truncated\"" }
+    },
+    {
+      "name": "touches_sensitive of the wrong type is an error",
+      "facts": { "touches_sensitive": 0 },
+      "expect": { "error": "fact \"touches_sensitive\"" }
+    },
+    {
+      "name": "touches_dependencies of the wrong type is an error",
+      "facts": { "touches_dependencies": 0 },
+      "expect": { "error": "fact \"touches_dependencies\"" }
+    },
+    {
+      "name": "files_changed of the wrong type is an error",
+      "facts": { "files_changed": "3" },
+      "expect": { "error": "fact \"files_changed\"" }
+    },
+    {
+      "name": "a missing touches_ci is an error",
+      "omit_facts": ["touches_ci"],
+      "expect": { "error": "fact \"touches_ci\"" }
+    },
+    {
+      "name": "a missing changes_package_scripts is an error",
+      "omit_facts": ["changes_package_scripts"],
+      "expect": { "error": "fact \"changes_package_scripts\"" }
+    },
+    {
+      "name": "a missing new_package_count is an error",
+      "omit_facts": ["new_package_count"],
+      "expect": { "error": "fact \"new_package_count\"" }
+    },
+    {
+      "name": "a missing docs_only is an error",
+      "omit_facts": ["docs_only"],
+      "expect": { "error": "fact \"docs_only\"" }
+    },
+    {
+      "name": "a missing author_is_dependency_bot is an error",
+      "omit_facts": ["author_is_dependency_bot"],
+      "expect": { "error": "fact \"author_is_dependency_bot\"" }
+    },
+    {
+      "name": "a missing dependency_update_type is an error",
+      "omit_facts": ["dependency_update_type"],
+      "expect": { "error": "fact \"dependency_update_type\"" }
+    },
+    {
+      "name": "a missing diff_truncated is an error",
+      "omit_facts": ["diff_truncated"],
+      "expect": { "error": "fact \"diff_truncated\"" }
+    },
+    {
+      "name": "a missing touches_sensitive is an error",
+      "omit_facts": ["touches_sensitive"],
+      "expect": { "error": "fact \"touches_sensitive\"" }
+    },
+    {
+      "name": "a missing touches_dependencies is an error",
+      "omit_facts": ["touches_dependencies"],
+      "expect": { "error": "fact \"touches_dependencies\"" }
+    },
+    {
+      "name": "a missing files_changed is an error",
+      "omit_facts": ["files_changed"],
+      "expect": { "error": "fact \"files_changed\"" }
     }
   ]
 }

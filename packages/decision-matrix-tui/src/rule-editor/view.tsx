@@ -127,7 +127,7 @@ export function RuleEditor(props: RuleEditorProps) {
 			const options: Option[] = Object.entries(context.thresholds)
 				.filter(fits)
 				.map(([name, number]) => ({ label: `${name}  (${number})`, value: name }));
-			options.push({ label: 'Type a number…', value: null, typed: { title: `${operatorWords(op)}`, initial: typeof value === 'number' ? String(value) : '', parse: parseNumber } });
+			options.push({ label: 'Type a number…', value: null, typed: { title: `${operatorWords(op, subject.type)}`, initial: typeof value === 'number' ? String(value) : '', parse: parseNumber } });
 			const found = options.findIndex((option) => option.value === value);
 			openPicker(`Compare with a threshold or a number · now ${valueText(value, op, context)}`, options, Math.max(0, found), false, [], ([next]) => set(next));
 			return;
@@ -320,7 +320,7 @@ function rowLine(row: Row, context: EditorContext, selected: boolean): Line {
 		case 'predicate':
 			return { text: `${pad}${row.subject.kind} ${row.subject.name}${row.subject.type ? `  (${row.subject.type})` : ''}`, selected };
 		case 'operator':
-			return { text: `${pad}${operatorWords(row.op)}  ${valueText(row.value, row.op, context)}`, selected };
+			return { text: `${pad}${operatorWords(row.op, row.subject.type)}  ${valueText(row.value, row.op, context)}`, selected };
 		case 'add-operator':
 			return { text: `${pad}+ add a comparison`, tone: 'dim', selected };
 		case 'add-condition':
@@ -412,11 +412,14 @@ function editorContext(workspace: Workspace, derived: Derived): EditorContext {
 	};
 	for (const testCase of derived.cases) walk(testCase.facts ?? {}, '');
 	const questions = questionMap(workspace);
+	const factTypes: Record<string, string> = {};
+	for (const [factPath, entry] of Object.entries(derived.ruleset.fact_schema ?? {})) factTypes[factPath] = entry.type;
 	return {
 		...(questions ? { questions } : {}),
 		thresholds: derived.ruleset.thresholds,
 		facts: [...facts].sort(),
 		factSamples,
+		factTypes,
 		actionTypes: [...new Set(derived.ruleset.rules.map((rule) => rule.action.type))],
 	};
 }

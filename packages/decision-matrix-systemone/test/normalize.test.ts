@@ -79,6 +79,17 @@ describe('normalizeSystemOneResponse', () => {
 		assert.deepEqual(result.usage, { input_tokens: 3, output_tokens: 1 });
 	});
 
+	it('rejects a probability outside 0 to 1 and does not repair it', () => {
+		assert.throws(
+			() => normalizeSystemOneResponse({ answers: { ok: { type: 'noul', noul: 1.2 } } }),
+			/must be a finite number from 0 to 1\. Received 1\.2/,
+		);
+		assert.throws(
+			() => normalizeSystemOneResponse({ answers: { ok: { type: 'noul', noul: 0.2, confidence: 2 } } }),
+			/from 0 to 1/,
+		);
+	});
+
 	it('prefers a top-level answers map over a nested one', () => {
 		const result = normalizeSystemOneResponse({
 			answers: { ok: { type: 'noul', noul: 0.2 } },

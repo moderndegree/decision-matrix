@@ -273,7 +273,7 @@ export function App(props: { initial: Workspace; io: AppIO }) {
 
 	function onRulesKey(key: KeyEvent, vertical: number) {
 		if (vertical && key.shift) {
-			if (onDefault) return setStatus({ text: 'The default action always comes last.', tone: 'text' });
+			if (onDefault) return setStatus({ text: 'The default action is a footer and cannot be moved.', tone: 'text' });
 			if (apply(moveRule(workspace, ruleRow, vertical as -1 | 1))) select('rules', ruleRow + vertical, rules.length + 1);
 			return;
 		}

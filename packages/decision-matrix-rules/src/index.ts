@@ -10,6 +10,7 @@ export {
 	referencedQuestions,
 	referencedThresholds,
 	renderTemplate,
+	parseInstant,
 	traceRules,
 	validateFacts,
 	validateRuleset,
@@ -23,6 +24,18 @@ export {
 export { diffRulesets, type ChangeEffect, type PolicyChange } from './diff';
 export { lintRuleset, type LintFinding, type LintOptions, type LintQuestion, type LintSeverity } from './lint';
 export {
+	compileFlatRows,
+	decisionReceipt,
+	flatWhen,
+	projectTable,
+	questionsScriptsCannotOpen,
+	rulesetHash,
+	type DecisionReceipt,
+	type FlatCell,
+	type FlatRow,
+	type TableRow,
+} from './record';
+export {
 	ACCESS_REVIEW_RULES,
 	ATTACK_TRIAGE_RULES,
 	CI_CHANGE_RULES,
@@ -32,12 +45,17 @@ export {
 } from './presets';
 export type {
 	ActionSpec,
+	Agreement,
 	AnswerView,
 	Condition,
 	EvaluationResult,
 	FactOperator,
+	FactSchemaEntry,
+	FactSchemaType,
 	FactValue,
 	Operator,
+	OrderedValue,
+	QuestionContribution,
 	Rule,
 	Ruleset,
 	ThresholdRef,

@@ -11,6 +11,7 @@ import {
 
 import { buildItemOutput, noMatchMessage } from './output';
 import {
+	applyRuleRows,
 	readFactsInput,
 	readOptions,
 	readQuestions,
@@ -26,6 +27,9 @@ import {
 	assertThresholdsResolve,
 	decideFromFacts,
 	evaluateRules,
+	questionsScriptsCannotOpen,
+	rulesetHash,
+	validateRuleset,
 } from 'decision-matrix-rules';
 import {
 	SystemOneError,
@@ -189,7 +193,7 @@ export class DecisionMatrix implements INodeType {
 				default: '{}',
 				displayOptions: { show: { answerWith: ['scripts'] } },
 				description:
-					'Optional scripts document. Empty uses the built-in script for Generic Triage, SDLC Change, or Support / Ops. Paste a document when Questions replaces the preset. A question a step answers is not sent to the server.',
+					'Optional scripts document. Empty uses the built-in script for Generic Triage, SDLC Change, or Support / Ops. Paste a document when Questions replaces the preset. A question a step answers is not sent, unless an opening rule reads it and the ruleset sets open_gate_requires_facts. The server answer wins on those.',
 			},
 			{
 				displayName: 'Thresholds',
@@ -218,6 +222,100 @@ export class DecisionMatrix implements INodeType {
 								type: 'number',
 								default: 0,
 								typeOptions: { numberPrecision: 4 },
+							},
+						],
+					},
+				],
+			},
+			{
+				displayName: 'Rule Rows',
+				name: 'ruleRows',
+				type: 'fixedCollection',
+				typeOptions: { multipleValues: true, sortable: true },
+				placeholder: 'Add Rule',
+				default: {},
+				description:
+					'Optional flat rules. Empty keeps the rules in Rules JSON. A non-empty collection replaces that rules array and keeps version, thresholds, the default action, owner, ticket, fact schema, and agreements from the JSON. Nested groups stay in the JSON.',
+				options: [
+					{
+						displayName: 'Rule',
+						name: 'rule',
+						values: [
+							{ displayName: 'Id', name: 'id', type: 'string', default: '', placeholder: 'hold-ci' },
+							{
+								displayName: 'Combine',
+								name: 'combine',
+								type: 'options',
+								default: 'all',
+								options: [
+									{ name: 'All', value: 'all' },
+									{ name: 'Any', value: 'any' },
+								],
+							},
+							{ displayName: 'Action Type', name: 'type', type: 'string', default: 'hold' },
+							{ displayName: 'Target', name: 'target', type: 'string', default: '' },
+							{ displayName: 'Reason', name: 'reason', type: 'string', default: '' },
+							{
+								displayName: 'Holds',
+								name: 'gate',
+								type: 'boolean',
+								default: true,
+								description: 'On holds the gate closed. Off opens it.',
+							},
+							{
+								displayName: 'Conditions',
+								name: 'conditions',
+								type: 'fixedCollection',
+								typeOptions: { multipleValues: true },
+								placeholder: 'Add Condition',
+								default: {},
+								options: [
+									{
+										displayName: 'Condition',
+										name: 'condition',
+										values: [
+											{ displayName: 'Subject', name: 'subject', type: 'string', default: '', placeholder: 'touches_ci' },
+											{
+												displayName: 'Source',
+												name: 'source',
+												type: 'options',
+												default: 'fact',
+												options: [
+													{ name: 'Fact', value: 'fact' },
+													{ name: 'Question', value: 'question' },
+												],
+											},
+											{
+												displayName: 'Operator',
+												name: 'operator',
+												type: 'options',
+												default: 'eq',
+												options: [
+													{ name: 'eq', value: 'eq' },
+													{ name: 'neq', value: 'neq' },
+													{ name: 'in', value: 'in' },
+													{ name: 'not_in', value: 'not_in' },
+													{ name: 'contains', value: 'contains' },
+													{ name: 'not_contains', value: 'not_contains' },
+													{ name: 'gte', value: 'gte' },
+													{ name: 'gt', value: 'gt' },
+													{ name: 'lte', value: 'lte' },
+													{ name: 'lt', value: 'lt' },
+													{ name: 'confidence_gte', value: 'confidence_gte' },
+													{ name: 'confidence_lt', value: 'confidence_lt' },
+												],
+											},
+											{
+												displayName: 'Value',
+												name: 'value',
+												type: 'string',
+												default: '',
+												description:
+													'JSON true, false, null, a number, or an array. Anything else stays text, including a threshold name or an ISO-8601 instant.',
+											},
+										],
+									},
+								],
 							},
 						],
 					},
@@ -296,10 +394,18 @@ export class DecisionMatrix implements INodeType {
 				});
 			} catch (error) {
 				if (this.continueOnFail()) {
-					output.push({
-						json: { error: error instanceof Error ? error.message : String(error) },
-						pairedItem: { item: itemIndex },
-					});
+					const message = error instanceof Error ? error.message : String(error);
+					const json: IDataObject = { error: message };
+					try {
+						const rules = applyRuleRows(
+							readRulesInput(this.getNodeParameter('rules', itemIndex)),
+							this.getNodeParameter('ruleRows', itemIndex, {}),
+						);
+						json.receipt = { ruleset_hash: rulesetHash(validateRuleset(rules)), error: message };
+					} catch {
+						// The ruleset could not be hashed. The item stays { error }, which is not a hold.
+					}
+					output.push({ json, pairedItem: { item: itemIndex } });
 					continue;
 				}
 				throw asNodeError(this, error, itemIndex);
@@ -315,7 +421,7 @@ export class DecisionMatrix implements INodeType {
  * 1. Read state, questions, rules, facts, scripts, thresholds, and options (expressions already resolved).
  * 2. Validate the ruleset and the facts before any network call so a typo does not spend a request.
  * 3. If leading facts-only rules decide, return that decision without calling the server.
- * 4. Run scripts. A question they answer is not sent.
+ * 4. Run scripts. A question they answer is not sent, unless an opening rule reads it and the ruleset requires a fact to open.
  * 5. POST {baseUrl}/v1/systemone with the questions still open. Facts and scripts are not sent.
  * 6. Normalize the answers, then let the pure engine pick the first matching rule.
  * 7. Shape the routing item. Fail closed only when Fail on no matching rule is on.
@@ -330,14 +436,17 @@ async function evaluateItem(
 	const questionsParam = ctx.getNodeParameter('questions', itemIndex, {});
 	// Non-empty Questions replaces the preset. Empty keeps the preset.
 	const questions = readQuestions(questionSet, questionsParam);
-	const rules = readRulesInput(ctx.getNodeParameter('rules', itemIndex));
+	const rules = applyRuleRows(readRulesInput(ctx.getNodeParameter('rules', itemIndex)), ctx.getNodeParameter('ruleRows', itemIndex, {}));
 	const thresholdOverrides = readThresholdOverrides(ctx.getNodeParameter('thresholds', itemIndex, {}));
 	const facts = readFactsInput(ctx.getNodeParameter('facts', itemIndex, '{}'));
 	const options = readOptions(ctx.getNodeParameter('options', itemIndex, {}));
 
 	// Fail here, before the HTTP call, when the rules JSON is structurally wrong,
 	// a threshold name would not resolve, a script is wrong, or a referenced fact is missing.
-	assertThresholdsResolve(rules, thresholdOverrides);
+	// The three calls below validate the JSON themselves. The parsed ruleset is
+	// for the receipt and for questions a script cannot open. Passing that
+	// parsed ruleset back in makes when.kind an unknown key.
+	const ruleset = assertThresholdsResolve(rules, thresholdOverrides);
 	assertFactsResolve(rules, facts);
 	const program = readScripts(
 		ctx.getNodeParameter('answerWith', itemIndex, 'server'),
@@ -348,14 +457,19 @@ async function evaluateItem(
 
 	const fromFacts = decideFromFacts(rules, facts, thresholdOverrides);
 	if (fromFacts) {
-		return buildItemOutput(fromFacts, { answers: {}, rawAnswers: {} }, undefined, {
-			includeFullAnswers: options.includeFullAnswers,
-			includeRawResponse: false,
-		}) as IDataObject;
+		return buildItemOutput(
+			fromFacts,
+			{ answers: {}, rawAnswers: {} },
+			undefined,
+			{ includeFullAnswers: options.includeFullAnswers, includeRawResponse: false },
+			ruleset,
+		) as IDataObject;
 	}
 
 	const scriptAnswers = program ? runScripts(program, state) : {};
-	const remaining = unansweredQuestions(questions, scriptAnswers);
+	const blocked = new Set(questionsScriptsCannotOpen(ruleset));
+	const skip = Object.fromEntries(Object.entries(scriptAnswers).filter(([id]) => !blocked.has(id)));
+	const remaining = unansweredQuestions(questions, skip);
 	let systemOne: SystemOneResult = { answers: {}, rawAnswers: {} };
 	let rawBody: unknown;
 	if (Object.keys(remaining).length > 0) {
@@ -366,8 +480,8 @@ async function evaluateItem(
 		rawBody = http.body;
 		systemOne = interpretHttpResponse(http.statusCode, http.body, baseUrl);
 	}
-	const answers = { ...systemOne.answers, ...scriptAnswers };
-	const rawAnswers: Record<string, unknown> = { ...systemOne.rawAnswers, ...scriptAnswers };
+	const answers = { ...scriptAnswers, ...systemOne.answers };
+	const rawAnswers: Record<string, unknown> = { ...scriptAnswers, ...systemOne.rawAnswers };
 	systemOne = { ...systemOne, answers, rawAnswers };
 	const evaluation = evaluateRules(rules, answers, thresholdOverrides, facts);
 
@@ -375,10 +489,16 @@ async function evaluateItem(
 		throw new RulesError(noMatchMessage(evaluation));
 	}
 
-	return buildItemOutput(evaluation, systemOne, rawBody, {
-		includeFullAnswers: options.includeFullAnswers,
-		includeRawResponse: options.includeRawResponse && rawBody !== undefined,
-	}) as IDataObject;
+	return buildItemOutput(
+		evaluation,
+		systemOne,
+		rawBody,
+		{
+			includeFullAnswers: options.includeFullAnswers,
+			includeRawResponse: options.includeRawResponse && rawBody !== undefined,
+		},
+		ruleset,
+	) as IDataObject;
 }
 
 async function serverBaseUrl(ctx: IExecuteFunctions): Promise<string> {

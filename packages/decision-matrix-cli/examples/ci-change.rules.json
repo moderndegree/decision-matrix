@@ -1,6 +1,9 @@
 {
   "version": 1,
   "open_gate_requires_facts": true,
+  "owner": "decision-matrix",
+  "ticket": "ci-change",
+  "agreements": [{ "question": "changes_runtime_behavior", "fact": "docs_only", "relation": "inverse" }],
   "default_action": {
     "type": "hold",
     "target": "human",

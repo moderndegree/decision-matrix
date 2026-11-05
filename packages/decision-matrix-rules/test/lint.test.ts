@@ -59,7 +59,11 @@ describe('traceRules', () => {
 describe('lintRuleset', () => {
 
 	it('warns when the model alone can open the gate, or the default proceeds', () => {
-		assert.deepEqual(codes(lintRuleset(ATTACK_TRIAGE_RULES)), ['model-opens-gate:allow-legitimate']);
+		assert.deepEqual(codes(lintRuleset(ATTACK_TRIAGE_RULES)), [
+			'overlap:hold-uncertain',
+			'model-opens-gate:allow-legitimate',
+			'overlap:allow-legitimate',
+		]);
 		const open = rules([], { thresholds: {}, default_action: { type: 'pass', target: 't', reason: 'r', gate: false } });
 		assert.deepEqual(codes(lintRuleset(open)), ['default-opens-gate']);
 	});
@@ -122,5 +126,63 @@ describe('lintRuleset', () => {
 
 	it('returns an invalid ruleset as one error instead of throwing', () => {
 		assert.deepEqual(codes(lintRuleset({ version: 2 })), ['invalid']);
+	});
+
+	it('warns when two rules can both be true and they disagree', () => {
+		const policy = rules([
+			rule('holds', { all: [{ fact: 'x', eq: true }] }),
+			rule('opens', { all: [{ fact: 'y', eq: true }] }, false),
+		]);
+		assert.deepEqual(codes(lintRuleset(policy)).filter((code) => code.startsWith('overlap')), ['overlap:opens']);
+	});
+
+	it('does not warn about overlap when the later rule is fully shadowed', () => {
+		const policy = rules([
+			rule('broad', { all: [{ question: 'risk', gte: 2 }] }),
+			rule('narrow', { all: [{ question: 'risk', gte: 3 }] }, false),
+		]);
+		const found = codes(lintRuleset(policy));
+		assert.deepEqual(found.filter((code) => code.startsWith('overlap')), []);
+		assert.ok(found.includes('shadowed:narrow'));
+	});
+
+	it('requires a closed default when a rule opens, and owner and ticket only when asked', () => {
+		const open = rules([rule('opens', { all: [{ fact: 'a', eq: true }] }, false)]);
+		assert.deepEqual(codes(lintRuleset(open)).filter((code) => code.startsWith('missing-')), []);
+		assert.deepEqual(codes(lintRuleset(open, { governance: true })).filter((code) => code.startsWith('missing-')), [
+			'missing-owner',
+			'missing-ticket',
+		]);
+		const bothOpen = rules([rule('opens', { all: [{ fact: 'a', eq: true }] }, false)], {
+			default_action: { type: 'pass', target: 't', reason: 'r', gate: false },
+		});
+		const found = codes(lintRuleset(bothOpen));
+		assert.ok(found.includes('default-opens-gate'));
+		assert.ok(found.includes('open-without-closed-default'));
+	});
+
+	it('checks a fact schema and agreement shapes', () => {
+		const questions = { kind: { type: 'choice', criteria: { a: 'A' } } };
+		const policy = rules(
+			[
+				rule('typed', { all: [{ fact: 'touches_ci', eq: true }] }),
+				rule('other', { all: [{ fact: 'extra', eq: 1 }] }),
+			],
+			{
+				fact_schema: {
+					touches_ci: { type: 'number', required: true },
+					tags: { type: 'array', required: false },
+					idle: { type: 'boolean', required: false },
+				},
+				agreements: [
+					{ question: 'kind', fact: 'tags', relation: 'eq' },
+					{ question: 'kind', fact: 'idle', relation: 'eq' },
+				],
+			},
+		);
+		const found = codes(lintRuleset(policy, { questions }));
+		for (const expected of ['fact-type:typed', 'unknown-fact:other', 'unused-fact', 'agreement-shape']) {
+			assert.ok(found.includes(expected), `${expected} in ${found.join(', ')}`);
+		}
 	});
 });

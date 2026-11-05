@@ -142,7 +142,7 @@ The thresholds are low on purpose. A 0.5 chance that the PR text is addressing t
 2. Copy `collect-facts.mjs`, `ci-change.rules.json`, `ci-change.questions.json`, and `ci-change.cases.json` to `.github/decision-matrix/`. Edit the rules there. They are reviewed like code.
 3. Set the repository variable `DECISION_SERVER_URL` and the secret `DECISION_SERVER_API_KEY`.
 4. Make the `gate` job a required status check.
-5. Copy [`examples/github/policy-tests.yml`](examples/github/policy-tests.yml) to `.github/workflows/` too. It runs `check --strict` and `test --require-coverage` on every PR that edits the policy. It calls no server and needs no secrets.
+5. Copy [`examples/github/policy-tests.yml`](examples/github/policy-tests.yml) to `.github/workflows/` too. It runs `check` and `test --require-coverage --require-fact-errors` on every PR that edits the policy. It calls no server and needs no secrets. `check` fails on errors. The starter policy has overlap warnings, so `check --strict` fails it.
 
 How it stays trustworthy:
 
@@ -187,7 +187,11 @@ A cases file says what the policy must decide. Each case gives facts and saved a
 
 The format is [`schema/cases.schema.json`](schema/cases.schema.json), and `readCases` accepts exactly what it accepts. Facts merge over the defaults, including nested objects. Answers replace default answers by question id, and thresholds replace default thresholds by name. Answers accept the same dialects as `--answers`.
 
-`expect` takes any of `matched_rule` (null means the default action), `action`, `target`, `reason`, `gate`, `from_facts` (true when the leading facts-only rules must decide without the server), and `error` (a substring of the error the case must raise, for example a missing fact).
+`expect` takes any of `matched_rule` (null means the default action), `action`, `target`, `reason`, `gate`, `from_facts` (true when the leading facts-only rules must decide without the server), and `error` (a substring of the error the case must raise, for example a missing fact). `omit_facts` deletes paths after the defaults merge, so a case can expect an error for a fact the defaults would have supplied. A decision is not an acceptable expected result for an absent fact or a wrong type.
+
+`--require-fact-errors` fails unless every fact path a rule reads has a passing absent-fact error and a passing wrong-type error. The shipped CI and access-review cases include both.
+
+Optional `provenance` records `model_id`, `temperature`, and `questions_hash` together. Unknown keys are rejected. `questions_hash` is the sha256 of the questions file's raw UTF-8 bytes.
 
 ```bash
 decision-matrix test --preset ci-change --cases examples/ci-change.cases.json --require-coverage
@@ -222,12 +226,36 @@ decision-matrix check --rules policy.json --questions questions.json --strict
 | `model-opens-gate` | warning | A rule with gate false needs no fact, so answers alone open it. |
 | `default-opens-gate` | warning | No match proceeds. |
 | `shadowed` | warning | An earlier rule matches whenever this one would, so this one never wins. |
+| `overlap` | warning | Two rules can both be true and they disagree on type, target, or gate. A fully shadowed rule is not also reported. The check can miss a real overlap. It does not warn when it cannot prove one. |
 | `out-of-range` | warning | A comparison outside a score's levels or a probability's 0–1. |
+| `open-without-closed-default` | error | A rule opens the gate and `default_action.gate` is false. |
+| `missing-owner`, `missing-ticket` | error | Only with `--strict`. The ruleset can open the gate and the field is empty. |
+| `unknown-fact` | error | A rule reads a path that is not in `fact_schema`, when a schema is present. |
+| `fact-type` | error | An operator does not fit the declared fact type. |
+| `agreement-shape` | warning | An agreement pairs shapes that cannot correspond. |
 | `fact-rule-after-model-rule` | info | A facts-only rule comes after a rule that reads answers, so it cannot decide first. |
 | `unused-question` | info | Asked on every call, read by no rule. |
 | `unused-threshold` | info | Defined, used by no rule. |
+| `unused-fact` | info | A `fact_schema` path no rule reads. |
 
-The question checks run when `--questions` is given, or with `--preset`. The `shadowed` check is conservative. It can miss a dead rule, but it does not call a live rule dead.
+The question checks run when `--questions` is given, or with `--preset`. The `shadowed` and `overlap` checks are conservative. Each can miss a finding. Neither reports one it cannot prove.
+
+Stdout of `decide` also includes `margin`, `contributions`, and `receipt`. `margin` is the same minimum as `confidence`. `contributions` lists each question the winner read, with that question's margin and whether it sat on a matched branch. `receipt` is the sha256 of the validated ruleset, the matched rule, the action, the gate, and the fact paths and question ids that were read. It does not contain fact values or model text. An error is a separate field from a hold.
+
+## Shadow, sweep, and table
+
+```bash
+decision-matrix shadow --from old.rules.json --to edited.rules.json --cases examples/ci-change.cases.json
+decision-matrix sweep --preset ci-change --cases examples/ci-change.cases.json
+decision-matrix table --preset ci-change
+decision-matrix import --rules flat.rules.json
+```
+
+`shadow` replays the candidate ruleset on saved cases and prints both actions. Hold-to-open comes first. It never writes an action. Exit 0, except file errors (exit 1). `--fail-on-open` exits 2 when any case goes from hold to open.
+
+`sweep` tries cutoffs 0.50, 0.55, … 0.95 for each threshold whose baseline is in 0 to 1, and counts hold-to-open against open-to-hold. The baseline is marked and is not written back. It is not a calibration. When the cases have no provenance, the output says so. `--questions` compares the sha256 of that file with `questions_hash` and prints a note. It does not fail the run.
+
+`table` prints a read-only projection. A flat conjunction is one line. Nested `all` / `any`, including a top-level `any`, stays `(tree)`. `import` accepts only unary cells in the closed operator set and prints the ruleset after it validates. An instant stays the ISO-8601 string that was written.
 
 ## Diff
 

@@ -1,4 +1,4 @@
-import { RulesError, isPlainObject } from 'decision-matrix-rules';
+import { RulesError, compileFlatRows, isPlainObject, type FlatCell, type FlatRow } from 'decision-matrix-rules';
 import {
 	GENERIC_TRIAGE_QUESTIONS,
 	GENERIC_TRIAGE_SCRIPTS,
@@ -195,4 +195,81 @@ function parseJsonParameter(value: unknown, label: string): unknown {
 
 function cloneQuestions(preset: object): Record<string, unknown> {
 	return JSON.parse(JSON.stringify(preset)) as Record<string, unknown>;
+}
+
+/**
+ * Empty rule rows keep the Rules JSON. A non-empty collection replaces the
+ * `rules` array and keeps version, thresholds, default_action, owner, ticket,
+ * fact_schema, agreements, and open_gate_requires_facts from that JSON.
+ */
+export function applyRuleRows(rules: unknown, rowsParam: unknown): unknown {
+	const rows = readRuleRows(rowsParam);
+	if (rows.length === 0) return rules;
+	if (!isPlainObject(rules)) throw new RulesError('Rules must be a JSON object when rule rows replace them.');
+	return { ...rules, rules: compileFlatRows(rows) };
+}
+
+/** n8n fixed-collection shape: `{ rule: [{ id, combine, type, target, reason, gate, conditions: { condition: [...] } }] }`. */
+export function readRuleRows(value: unknown): FlatRow[] {
+	if (value === undefined || value === null || value === '') return [];
+	if (!isPlainObject(value)) throw new RulesError('Rule rows must be a collection of rules.');
+	if (value.rule === undefined) return [];
+	if (!Array.isArray(value.rule)) throw new RulesError('Rule rows must be a collection of rules.');
+	return value.rule.map((row, index) => compileRuleRow(row, index));
+}
+
+function compileRuleRow(row: unknown, index: number): FlatRow {
+	const label = `Rule row ${index + 1}`;
+	if (!isPlainObject(row)) throw new RulesError(`${label} must be an object.`);
+	if (typeof row.id !== 'string' || row.id.trim() === '') throw new RulesError(`${label} is missing an id.`);
+	if (row.combine !== 'all' && row.combine !== 'any') {
+		throw new RulesError(`${label} combine must be "all" or "any". Nested groups stay in the Rules JSON.`);
+	}
+	if (typeof row.type !== 'string' || row.type.trim() === '') throw new RulesError(`${label} is missing an action type.`);
+	if (typeof row.target !== 'string') throw new RulesError(`${label} is missing a target.`);
+	if (typeof row.reason !== 'string') throw new RulesError(`${label} is missing a reason.`);
+	if (typeof row.gate !== 'boolean') throw new RulesError(`${label} gate must be a boolean.`);
+	return {
+		id: row.id.trim(),
+		combine: row.combine,
+		conditions: readCells(row.conditions, label),
+		action: { type: row.type.trim(), target: row.target, reason: row.reason, gate: row.gate },
+	};
+}
+
+function readCells(value: unknown, label: string): FlatCell[] {
+	if (!isPlainObject(value) || !Array.isArray(value.condition) || value.condition.length === 0) {
+		throw new RulesError(`${label} needs at least one condition.`);
+	}
+	return value.condition.map((cell, index) => {
+		const cellLabel = `${label} condition ${index + 1}`;
+		if (!isPlainObject(cell)) throw new RulesError(`${cellLabel} must be one comparison.`);
+		if (cell.source !== 'fact' && cell.source !== 'question') {
+			throw new RulesError(`${cellLabel} source must be "fact" or "question".`);
+		}
+		if (typeof cell.subject !== 'string' || cell.subject.trim() === '') throw new RulesError(`${cellLabel} is missing a subject.`);
+		if (typeof cell.operator !== 'string') throw new RulesError(`${cellLabel} is missing an operator.`);
+		return {
+			subject: cell.subject.trim(),
+			source: cell.source,
+			operator: cell.operator,
+			value: parseCellValue(cell.value),
+		};
+	});
+}
+
+/** JSON true, false, null, a number, or an array. Anything else stays text, including threshold names. */
+function parseCellValue(value: unknown): unknown {
+	if (typeof value !== 'string') return value;
+	const trimmed = value.trim();
+	if (trimmed === '') return '';
+	try {
+		const parsed = JSON.parse(trimmed) as unknown;
+		if (parsed === true || parsed === false || parsed === null) return parsed;
+		if (typeof parsed === 'number' && Number.isFinite(parsed)) return parsed;
+		if (Array.isArray(parsed)) return parsed;
+	} catch {
+		// Threshold names and other text stay strings.
+	}
+	return trimmed;
 }

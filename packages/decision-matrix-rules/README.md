@@ -14,7 +14,9 @@ const decision =
   evaluateRules(ruleset, await askServer(), overrides, facts);
 ```
 
-`decision` is `{ action, target, reason, gate, matched_rule, confidence }`.
+`decision` is `{ action, target, reason, gate, matched_rule, confidence, margin, contributions }`. `margin` is the same minimum as `confidence`. `contributions` lists each question the winner read. `decisionReceipt` hashes the validated ruleset and lists the fact paths and question ids that were read, without the values. An error is a separate field from a hold.
+
+Optional `fact_schema` declares each fact's type. A missing fact and a wrong type stay errors. Optional `agreements` can turn an opening decision into a hold. An agreement never opens the gate. `gte`, `gt`, `lte`, and `lt` compare an ISO-8601 instant with a timezone offset as epoch milliseconds. A number is not coerced to an instant.
 
 Call `assertThresholdsResolve` and `assertFactsResolve` before contacting a decision server so a bad ruleset or a missing fact does not spend a request. `evaluateRules` validates again.
 

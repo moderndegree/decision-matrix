@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 
 import { ACCESS_REVIEW_RULES, CI_CHANGE_RULES } from 'decision-matrix-rules';
 
-import { EXIT_ERROR, EXIT_OK, readCases, run, runCases, uncovered, formatWhy } from '../src';
+import { EXIT_ERROR, EXIT_OK, factErrorGaps, readCases, run, runCases, uncovered, formatWhy } from '../src';
 import { captured, readExample, rule, rules } from './fixtures';
 
 describe('policy cases', () => {
@@ -54,18 +54,34 @@ describe('policy cases', () => {
 		assert.match(why[why.length - 1]!, /default\s+match/);
 	});
 
+	it('names later matches that did not apply and stops before the default', () => {
+		const policy = rules([rule('first', { all: [{ fact: 'a', eq: true }] }), rule('second', { all: [{ fact: 'b', eq: true }] })]);
+		const run = runCases(
+			policy,
+			readCases({
+				version: 1,
+				cases: [{ name: 'both', facts: { a: true, b: true }, expect: { matched_rule: 'second' } }],
+			}),
+		);
+		const why = formatWhy(run.results[0]!.trace!).join('\n');
+		assert.match(why, /second\s+match\s+\(did not apply\)/);
+		assert.doesNotMatch(why, /default\s+match/);
+	});
+
 	it('ships cases that pass and cover every rule of both strict presets', () => {
 		for (const [name, policy] of [
 			['ci-change', CI_CHANGE_RULES],
 			['access-review', ACCESS_REVIEW_RULES],
 		] as const) {
-			const run = runCases(policy, readCases(JSON.parse(readExample(`${name}.cases.json`))));
+			const cases = readCases(JSON.parse(readExample(`${name}.cases.json`)));
+			const run = runCases(policy, cases);
 			assert.deepEqual(
 				run.results.filter((result) => !result.passed).map((result) => result.name),
 				[],
 				name,
 			);
 			assert.deepEqual(uncovered(run), [], name);
+			assert.deepEqual(factErrorGaps(policy, cases, run.results), [], name);
 		}
 	});
 });
@@ -74,9 +90,12 @@ describe('decision-matrix test and check', () => {
 	const cases = { 'cases.json': readExample('ci-change.cases.json') };
 
 	it('test exits 0 when cases pass and 1 when a weakened policy breaks one', async () => {
-		const ok = captured(['test', '--preset', 'ci-change', '--cases', 'cases.json', '--require-coverage'], cases);
+		const ok = captured(
+			['test', '--preset', 'ci-change', '--cases', 'cases.json', '--require-coverage', '--require-fact-errors'],
+			cases,
+		);
 		assert.equal(await run(ok.io), EXIT_OK);
-		assert.match(ok.stdout.join(''), /16 passed, 0 failed/);
+		assert.match(ok.stdout.join(''), /36 passed, 0 failed/);
 
 		const weak = captured(['test', '--preset', 'ci-change', '--cases', 'cases.json', '--threshold', 'injection=0.9'], cases);
 		assert.equal(await run(weak.io), EXIT_ERROR);
@@ -98,7 +117,7 @@ describe('decision-matrix test and check', () => {
 		assert.equal(await run(io), EXIT_OK);
 		const parsed = JSON.parse(stdout.join(''));
 		assert.equal(parsed.passed, true);
-		assert.equal(parsed.results.length, 16);
+		assert.equal(parsed.results.length, 36);
 	});
 
 	it('check fails on errors always and on warnings with --strict', async () => {

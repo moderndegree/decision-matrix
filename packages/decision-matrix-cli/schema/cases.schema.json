@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "decision-matrix-cli/schema/cases.schema.json",
   "title": "Decision matrix policy cases",
-  "description": "Test cases for a ruleset: facts and saved answers, and the decision the rules must make. decision-matrix test runs them without a server. A case's facts merge over defaults.facts (nested objects merge too), its answers replace default answers by question id, and its thresholds replace default thresholds by name.",
+  "description": "Test cases for a ruleset: facts and saved answers, and the decision the rules must make. decision-matrix test runs them without a server. A case's facts merge over defaults.facts (nested objects merge too), then omit_facts deletes paths so a case can assert a default fact is absent. Answers replace default answers by question id, and thresholds replace default thresholds by name. provenance records the model, temperature, and questions-file hash the cases were captured with.",
   "$comment": "readCases in decision-matrix-cli accepts exactly the documents this schema accepts, and also checks that case names are unique. Answers are read with the same dialect tolerance as a server response (see PROTOCOL.md), so aliases such as a missing type are accepted. The facts and thresholds definitions match decision-matrix-rules' facts.schema.json and ruleset.schema.json, and a test keeps them equal.",
   "type": "object",
   "additionalProperties": false,
@@ -20,7 +20,8 @@
         "thresholds": { "$ref": "#/$defs/thresholds" }
       }
     },
-    "cases": { "type": "array", "items": { "$ref": "#/$defs/case" } }
+    "cases": { "type": "array", "items": { "$ref": "#/$defs/case" } },
+    "provenance": { "$ref": "#/$defs/provenance" }
   },
   "$defs": {
     "case": {
@@ -32,8 +33,28 @@
         "facts": { "$ref": "#/$defs/facts" },
         "answers": { "$ref": "#/$defs/answers" },
         "thresholds": { "$ref": "#/$defs/thresholds" },
+        "omit_facts": {
+          "description": "Fact paths deleted after the defaults merge, so a case can expect an error for a fact the defaults would have supplied.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/factPath" }
+        },
         "expect": { "$ref": "#/$defs/expect" }
       }
+    },
+    "provenance": {
+      "description": "Optional. When present, model_id, temperature, and questions_hash are all required. Unknown keys are rejected.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model_id", "temperature", "questions_hash"],
+      "properties": {
+        "model_id": { "type": ["string", "null"] },
+        "temperature": { "type": ["number", "null"] },
+        "questions_hash": { "type": "string", "minLength": 1, "pattern": "\\S" }
+      }
+    },
+    "factPath": {
+      "type": "string",
+      "pattern": "^(?!(?:.*\\.)?(?:__proto__|prototype|constructor)(?:\\.|$))[A-Za-z_][A-Za-z0-9_-]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*$"
     },
     "expect": {
       "description": "What the decision must be. Name at least one field. Only the named fields are compared.",

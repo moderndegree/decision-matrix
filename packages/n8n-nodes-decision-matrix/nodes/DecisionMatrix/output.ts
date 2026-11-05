@@ -1,4 +1,4 @@
-import type { EvaluationResult } from 'decision-matrix-rules';
+import { decisionReceipt, type EvaluationResult, type Ruleset } from 'decision-matrix-rules';
 import type { SystemOneResult } from 'decision-matrix-systemone';
 
 export interface OutputFlags {
@@ -16,6 +16,7 @@ export function buildItemOutput(
 	systemOne: SystemOneResult,
 	rawBody: unknown,
 	flags: OutputFlags,
+	ruleset: Ruleset,
 ): Record<string, unknown> {
 	const output: Record<string, unknown> = {
 		action: evaluation.action,
@@ -24,6 +25,9 @@ export function buildItemOutput(
 		gate: evaluation.gate,
 		matched_rule: evaluation.matched_rule,
 		confidence: evaluation.confidence,
+		margin: evaluation.margin,
+		contributions: evaluation.contributions,
+		receipt: decisionReceipt(ruleset, evaluation),
 	};
 	if (flags.includeFullAnswers) output.answers = systemOne.rawAnswers;
 	if (flags.includeRawResponse) output.raw_response = rawBody;

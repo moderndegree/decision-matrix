@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import { buildItemOutput, noMatchMessage } from '../nodes/DecisionMatrix/output';
 import {
+	applyRuleRows,
 	readFactsInput,
 	readOptions,
 	readQuestions,
@@ -11,7 +12,7 @@ import {
 	readState,
 	readThresholdOverrides,
 } from '../nodes/DecisionMatrix/parameters';
-import { evaluateRules, type AnswerView } from 'decision-matrix-rules';
+import { evaluateRules, validateRuleset, type AnswerView } from 'decision-matrix-rules';
 import { GENERIC_TRIAGE_QUESTIONS, normalizeSystemOneResponse, runScripts } from 'decision-matrix-systemone';
 
 describe('readState', () => {
@@ -132,21 +133,23 @@ describe('buildItemOutput', () => {
 			answers: { ok: { type: 'noul', noul: 0.8 } },
 			usage: { input_tokens: 5, output_tokens: 1 },
 		});
-		const evaluation = evaluateRules(
-			{
-				version: 1,
-				default_action: { type: 'escalate', target: 'human', reason: 'No matching rule' },
-				rules: [],
-			},
-			systemOne.answers as Record<string, AnswerView>,
-		);
+		const rules = {
+			version: 1,
+			default_action: { type: 'escalate', target: 'human', reason: 'No matching rule' },
+			rules: [],
+		};
+		const ruleset = validateRuleset(rules);
+		const evaluation = evaluateRules(rules, systemOne.answers as Record<string, AnswerView>);
 		const full = buildItemOutput(evaluation, systemOne, { answers: systemOne.rawAnswers }, {
 			includeFullAnswers: true,
 			includeRawResponse: true,
-		});
+		}, ruleset);
 		assert.equal(full.action, 'escalate');
 		assert.equal(full.matched_rule, null);
 		assert.equal(full.confidence, 0);
+		assert.equal(full.margin, 0);
+		assert.deepEqual(full.contributions, []);
+		assert.equal(typeof (full.receipt as { ruleset_hash?: string }).ruleset_hash, 'string');
 		assert.ok(full.answers);
 		assert.ok(full.raw_response);
 		assert.deepEqual(full.usage, { input_tokens: 5, output_tokens: 1 });
@@ -154,11 +157,73 @@ describe('buildItemOutput', () => {
 		const slim = buildItemOutput(evaluation, { ...systemOne, usage: undefined }, { answers: {} }, {
 			includeFullAnswers: false,
 			includeRawResponse: false,
-		});
+		}, ruleset);
 		assert.equal('answers' in slim, false);
 		assert.equal('raw_response' in slim, false);
 		assert.equal('usage' in slim, false);
 		assert.match(noMatchMessage(evaluation), /Fail on no matching rule/);
+	});
+});
+
+describe('applyRuleRows', () => {
+	const rules = {
+		version: 1,
+		default_action: { type: 'hold', target: 'human', reason: 'No matching rule', gate: true },
+		rules: [{ id: 'keep', when: { fact: 'a', eq: 1 }, action: { type: 'hold', target: 't', reason: 'r', gate: true } }],
+	};
+
+	it('keeps the Rules JSON when the collection is empty', () => {
+		assert.equal(applyRuleRows(rules, undefined), rules);
+		assert.equal(applyRuleRows(rules, { rule: [] }), rules);
+	});
+
+	it('compiles a boolean and a threshold name, and rejects operators outside the closed set', () => {
+		const compiled = applyRuleRows(rules, {
+			rule: [
+				{
+					id: 'row',
+					combine: 'all',
+					type: 'hold',
+					target: 'security',
+					reason: 'why',
+					gate: true,
+					conditions: {
+						condition: [
+							{ source: 'fact', subject: 'touches_ci', operator: 'eq', value: ' true ' },
+							{ source: 'question', subject: 'q', operator: 'gte', value: ' high ' },
+						],
+					},
+				},
+			],
+		}) as { rules: Array<{ when: unknown }> };
+		assert.deepEqual(compiled.rules[0]?.when, {
+			all: [
+				{ fact: 'touches_ci', eq: true },
+				{ question: 'q', gte: 'high' },
+			],
+		});
+		const row = {
+			id: 'bad',
+			combine: 'all',
+			type: 'hold',
+			target: 't',
+			reason: 'r',
+			gate: true,
+		};
+		assert.throws(
+			() =>
+				applyRuleRows(rules, {
+					rule: [{ ...row, conditions: { condition: [{ source: 'fact', subject: 'a', operator: 'confidence_gte', value: '0.5' }] } }],
+				}),
+			/confidence_gte/,
+		);
+		assert.throws(
+			() =>
+				applyRuleRows(rules, {
+					rule: [{ ...row, conditions: { condition: [{ source: 'question', subject: 'q', operator: 'contains', value: 'x' }] } }],
+				}),
+			/contains/,
+		);
 	});
 });
 

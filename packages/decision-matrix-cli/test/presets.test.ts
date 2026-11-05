@@ -13,6 +13,7 @@ import {
 	referencedQuestions,
 	validateRuleset,
 	type AnswerView,
+	type LintQuestion,
 } from 'decision-matrix-rules';
 import { ACCESS_REVIEW_QUESTIONS, CI_CHANGE_QUESTIONS, SUPPORT_OPS_QUESTIONS } from 'decision-matrix-systemone';
 
@@ -144,9 +145,24 @@ describe('access-review preset', () => {
 });
 
 describe('presets with their questions', () => {
-	it('passes the strict presets cleanly with their questions', () => {
-		assert.deepEqual(lintRuleset(CI_CHANGE_RULES, { questions: CI_CHANGE_QUESTIONS }), []);
-		assert.deepEqual(lintRuleset(ACCESS_REVIEW_RULES, { questions: ACCESS_REVIEW_QUESTIONS }), []);
+	it('reports overlap on the strict presets and no other findings', () => {
+		const codes = (rules: unknown, questions: Record<string, LintQuestion>) =>
+			lintRuleset(rules, { questions }).map((finding) => `${finding.code}${finding.rule ? `:${finding.rule}` : ''}`);
+		assert.deepEqual(codes(CI_CHANGE_RULES, CI_CHANGE_QUESTIONS), [
+			'overlap:hold-injection',
+			'overlap:hold-suspicious-code',
+			'overlap:hold-mismatch',
+			'overlap:hold-risk',
+			'overlap:auto-merge-dependency-patch',
+			'overlap:pass-docs',
+			'overlap:pass-small-change',
+		]);
+		assert.deepEqual(codes(ACCESS_REVIEW_RULES, ACCESS_REVIEW_QUESTIONS), [
+			'overlap:review-human-without-mfa',
+			'overlap:review-injection',
+			'overlap:review-weak-justification',
+			'overlap:keep-justified',
+		]);
 	});
 
 	it('reports a question the support preset asks but never reads', () => {

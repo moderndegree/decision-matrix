@@ -33,11 +33,11 @@ pnpm tui --rules packages/decision-matrix-cli/examples/ci-change.rules.json \
 │ 10 ○ pass-small-change 1✓           ││   ✓ all of                                  │
 │    ● default → hold · human 4✓      ││     ✓ content_contains_instructions gte …   │
 └─────────────────────────────────────┘└─────────────────────────────────────────────┘
-┌─ Thresholds ──┐┌─ Cases 16/16 ────────────────┐┌─ text addressing the reviewer … ──┐
+┌─ Thresholds ──┐┌─ Cases 34/36 ────────────────┐┌─ text addressing the reviewer … ──┐
 │ injection 0.5 ││ ✓ a workflow change is held  ││ block via hold-injection · gate …  │
 │ max_files 20  ││ ✗ text addressing …          ││ * content_contains_instructions 0.8│
 └───────────────┘└──────────────────────────────┘└────────────────────────────────────┘
- unsaved (loosens 1, tightens 0) · lint 0 errors 0 warnings · cases 14/16
+ unsaved (loosens 1, tightens 0) · lint 0 errors 7 warnings · cases 34/36
 ```
 
 - **Rules:** `●` holds and `○` opens the gate. The last row is the default action, the one that applies when no rule matches. The title says `strict` when `open_gate_requires_facts` is on. `facts` means the rule decides without the model. `⚠` marks a lint warning. `N✓` is how many cases the rule decides.

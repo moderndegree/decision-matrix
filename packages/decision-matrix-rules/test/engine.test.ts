@@ -58,8 +58,14 @@ describe('validateRuleset', () => {
 	it('accepts the shipped rulesets and preserves an omitted gate as false', () => {
 		const ruleset = validateRuleset(GENERIC_TRIAGE_RULES);
 		assert.equal(ruleset.version, 1);
-		assert.equal(ruleset.default_action.gate, false);
+		assert.equal(ruleset.default_action.gate, true);
 		assert.equal(ruleset.rules[0]?.id, 'urgent-human');
+		const omitted = validateRuleset({
+			version: 1,
+			default_action: { type: 'escalate', target: 'human', reason: 'No matching rule' },
+			rules: [],
+		});
+		assert.equal(omitted.default_action.gate, false);
 		assert.equal(validateRuleset(SDLC_RULES).rules.length, 2);
 		assert.equal(validateRuleset(SUPPORT_OPS_RULES).rules.length, 2);
 		const attack = validateRuleset(ATTACK_TRIAGE_RULES);

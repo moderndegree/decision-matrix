@@ -33,10 +33,13 @@
         "questionSet": "sdlc",
         "rules": {
           "version": 1,
+          "owner": "decision-matrix",
+          "ticket": "sdlc",
           "default_action": {
             "type": "escalate",
             "target": "human",
-            "reason": "No matching rule"
+            "reason": "No matching rule",
+            "gate": true
           },
           "thresholds": {
             "high_confidence": 0.85,

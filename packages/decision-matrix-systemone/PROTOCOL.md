@@ -67,6 +67,7 @@ The normalizer also accepts these dialects, then returns the canonical answer vi
 - Numbers may be numeric strings. A boolean noul is read as 1 or 0.
 - Choice may be named `choice`, `value`, `selected`, or `label`. If it is missing, the highest probability wins.
 - `probabilities` may be a map or an array of `{ "value", "probability" }`.
+- `noul`, `confidence`, and every probability must be a finite number from 0 to 1. A value outside that range is an error. It is not clamped, and it is not replaced with 0.5. A score stays unbounded.
 - Usage may report `input_tokens` / `prompt_tokens` and `output_tokens` / `completion_tokens`, in snake or camel case.
 - The answers map may sit under `data` or `result` when it is not at the top level.
 - An answers array is rejected. That is a different protocol.
@@ -89,7 +90,7 @@ Numeric and confidence operators accept a number, a threshold name, `{{threshold
 
 Output confidence is the minimum `bestEffortConfidence` of the questions the winning rule references.
 
-- Choice and score prefer the server `confidence`. Otherwise choice uses the selected option's probability, then the maximum probability. Score uses the maximum level probability.
+- Choice and score prefer the server `confidence`. Otherwise choice uses the probability of the selected label, and score uses the probability of the selected level. A missing label does not fall back to the maximum probability in the map.
 - Noul has no separate confidence. Its contribution is decisiveness, `abs(noul - 0.5) * 2`. That is uncertainty, not the yes-probability. Compare a noul with `gte` / `gt` / `lte` / `lt`, not with `confidence_gte`.
 
 Schema: `decision-matrix-rules/schema/ruleset.schema.json`.
