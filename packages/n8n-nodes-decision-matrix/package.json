@@ -18,6 +18,7 @@
   "scripts": {
     "build": "node scripts/clean-dist.js && node scripts/bundle-node.js && node scripts/copy-assets.js",
     "test": "tsx --test test/*.test.ts",
+    "coverage": "tsx --test --experimental-test-coverage --test-coverage-exclude='test/**' --test-coverage-exclude='../**' test/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "prepublishOnly": "pnpm run build"
   },

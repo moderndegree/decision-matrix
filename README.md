@@ -81,7 +81,7 @@ The schemas are published with each package (`decision-matrix-rules/schema/rules
 
 ## Workspace
 
-pnpm workspaces with Turborepo. `pnpm build`, `pnpm test`, and `pnpm typecheck` run each package's own script in dependency order, and repeat runs come from the cache. `pnpm check` runs all three.
+pnpm workspaces with Turborepo. `pnpm build`, `pnpm test`, and `pnpm typecheck` run each package's own script in dependency order, and repeat runs come from the cache. `pnpm check` runs all three. `pnpm coverage` prints a coverage report for each package with Node's and Bun's built-in tools, so it adds no dependency.
 
 `pnpm-workspace.yaml` applies the same scrutiny to this repository's own dependencies as the gate applies to yours:
 

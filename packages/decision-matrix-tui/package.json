@@ -11,6 +11,7 @@
   "scripts": {
     "start": "bun src/main.tsx",
     "test": "bun test",
+    "coverage": "bun test --coverage",
     "typecheck": "tsc -p tsconfig.json",
     "compile": "bun scripts/compile.ts"
   },
